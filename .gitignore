@@ -1,0 +1,22 @@
+# Kompilaty
+*.ex5
+*.ex4
+*.obj
+*.o
+
+# Logi/tymczasowe/tester
+*.log
+*.tmp
+Tester/
+profiles/
+
+# Dane lokalne i wspólne
+MQL5/Files/**
+Common/Files/**
+
+# Systemowe
+Thumbs.db
+.DS_Store
+
+# VSCode (opcjonalnie)
+.vscode/
