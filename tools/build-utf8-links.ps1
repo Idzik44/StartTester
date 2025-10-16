@@ -1,97 +1,113 @@
-<# 
-Generuje docs/UTF8_LINKS.md z RAW linkami do wszystkich plików w docs/utf8/.
-Działa niezależnie od miejsca uruchomienia (sam szuka .git).
-#>
+# Generates docs/UTF8_LINKS.md with RAW links for all files in docs/utf8/.
+# Works without git.exe; parses .git/config and .git/HEAD. Safe to run from anywhere under the repo.
 
 function Find-RepoRoot {
-  param([string]$startDir)
-  $d = Resolve-Path $startDir
-  while ($d) {
-    if (Test-Path (Join-Path $d ".git")) { return $d }
-    $parent = Split-Path $d
-    if ($parent -and $parent -ne $d) { $d = $parent } else { break }
-  }
-  return $null
+    param([string]$startDir)
+    $d = (Resolve-Path $startDir).Path
+    while ($true) {
+        if (Test-Path (Join-Path $d ".git")) { return $d }
+        $parent = Split-Path $d
+        if (-not $parent -or $parent -eq $d) { break }
+        $d = $parent
+    }
+    return $null
 }
 
-# 1) Repo root
+# 1) repo root
 $hint = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 $repo = Find-RepoRoot $hint
-if (-not $repo) { Write-Error "Nie znalazłem .git – uruchom w lub spod folderu repo."; exit 1 }
+if (-not $repo) {
+    Write-Error "[build-utf8-links] .git not found. Run from inside the repo."
+    exit 1
+}
 
-# 2) Ścieżki
+# 2) paths
 $utf8Root = Join-Path $repo "docs\utf8"
-$outFile  = Join-Path $repo "docs\UTF8_LINKS.md"
-if (-not (Test-Path $utf8Root)) { Write-Error "Brak folderu: $utf8Root (najpierw zrób mirror UTF-8)."; exit 1 }
+$docsDir  = Join-Path $repo "docs"
+if (-not (Test-Path $docsDir)) { New-Item -ItemType Directory -Force -Path $docsDir | Out-Null }
+$outFile  = Join-Path $docsDir "UTF8_LINKS.md"
 
-# 3) Dane o zdalnym i gałęzi
-#    (obsługa zarówno HTTPS jak i SSH)
-$git = "git"
-try { $null = & $git -C $repo --version 2>$null } catch { $git = $null }
-if ($git) {
-  $origin = (& git -C $repo config --get remote.origin.url).Trim()
-  $branch = (& git -C $repo rev-parse --abbrev-ref HEAD).Trim()
-} else {
-  # fallback – ustaw ręcznie jeśli git nie jest w PATH
-  $origin = "https://github.com/Idzik44/StartTester.git"
-  $branch = "main"
+if (-not (Test-Path $utf8Root)) {
+    Write-Error "[build-utf8-links] Missing folder: $utf8Root (run mirror-to-utf8.ps1 first)."
+    exit 1
 }
 
-# 4) Zbuduj base do RAW
-# przykłady:
-#  - https://github.com/owner/repo.git           -> https://raw.githubusercontent.com/owner/repo/branch/
-#  - git@github.com:owner/repo.git               -> https://raw.githubusercontent.com/owner/repo/branch/
-#  - https://github.com/owner/repo               -> https://raw.githubusercontent.com/owner/repo/branch/
+# 3) owner/repo/branch (fallback: Idzik44/StartTester + main)
 $ownerRepo = $null
-if ($origin -match 'github\.com[:/]+([^/]+)/([^/.]+)') {
-  $ownerRepo = "$($Matches[1])/$($Matches[2])"
-} else {
-  Write-Warning "Nie udało się sparsować remote.origin.url ($origin). Używam domyślnego owner/repo."
-  $ownerRepo = "Idzik44/StartTester"
-}
+$branch    = "main"
+
+try {
+    $gitConfig = Join-Path $repo ".git\config"
+    if (Test-Path $gitConfig) {
+        $cfg = Get-Content $gitConfig -Raw
+        if ($cfg -match 'url\s*=\s*(.+)') {
+            $origin = $Matches[1].Trim()
+            if ($origin -match 'github\.com[:/]+([^/]+)/([^/.]+)') {
+                $ownerRepo = "$($Matches[1])/$($Matches[2])"
+            }
+        }
+    }
+} catch {}
+
+if (-not $ownerRepo) { $ownerRepo = "Idzik44/StartTester" }
+
+try {
+    $head = Join-Path $repo ".git\HEAD"
+    if (Test-Path $head) {
+        $h = Get-Content $head -Raw
+        if ($h -match 'ref:\s*refs/heads/(.+)') { $branch = $Matches[1].Trim() }
+    }
+} catch {}
+
 $rawBase = "https://raw.githubusercontent.com/$ownerRepo/$branch/"
 
-# 5) Zbierz pliki
+# 4) gather files
 $files = Get-ChildItem -Path $utf8Root -Recurse -Include *.mq5,*.mqh -File | Sort-Object FullName
-if ($files.Count -eq 0) { Write-Error "W docs/utf8 nie ma żadnych *.mq5/*.mqh"; exit 1 }
-
-# 6) Grupuj logicznie (Experts / Include / inne)
-$items = foreach ($f in $files) {
-  $rel = $f.FullName.Substring($repo.Length).TrimStart('\') -replace '\\','/'
-  [pscustomobject]@{
-    Rel=$rel
-    Kind = if ($rel -match '/MQL5/Experts/') { 'Experts' } elseif ($rel -match '/MQL5/Include/') { 'Include' } else { 'Other' }
-    Raw = $rawBase + $rel
-  }
+if ($files.Count -eq 0) {
+    Write-Error "[build-utf8-links] No *.mq5/*.mqh in docs/utf8 (did mirror run?)."
+    exit 1
 }
 
-$experts = $items | Where-Object {$_.Kind -eq 'Experts'}
-$include = $items | Where-Object {$_.Kind -eq 'Include'}
-$other   = $items | Where-Object {$_.Kind -eq 'Other'}
+# 5) build records
+$items = foreach ($f in $files) {
+    $relRepo = $f.FullName.Substring($repo.Length).TrimStart('\') -replace '\\','/'
+    [pscustomobject]@{
+        Rel  = $relRepo
+        Kind = if ($relRepo -match '/Experts/') { 'Experts' } elseif ($relRepo -match '/Include/') { 'Include' } else { 'Other' }
+        Raw  = $rawBase + $relRepo
+    }
+}
 
-# 7) Zbuduj markdown
+$experts = $items | Where-Object { $_.Kind -eq 'Experts' }
+$include = $items | Where-Object { $_.Kind -eq 'Include' }
+$other   = $items | Where-Object { $_.Kind -eq 'Other' }
+
+# 6) markdown
 $sb = New-Object System.Text.StringBuilder
-$null = $sb.AppendLine("# RAW linki do kopii UTF-8")
+$null = $sb.AppendLine("# RAW links for UTF-8 mirror")
 $null = $sb.AppendLine()
-$null = $sb.AppendLine("> Te linki wskazują na docs/utf8/** i służą tylko do przeglądu. Edycję robimy w MetaEditorze w oryginalnych plikach.")
+$null = $sb.AppendLine("> Links point to docs/utf8/** (read-only mirror). Edit originals in MetaEditor.")
+$null = $sb.AppendLine("> Repo: $ownerRepo, branch: $branch")
 $null = $sb.AppendLine()
 
 if ($experts.Count -gt 0) {
-  $null = $sb.AppendLine("## Experts")
-  foreach ($e in $experts) { $null = $sb.AppendLine("- [$($e.Rel)]($($e.Raw))") }
-  $null = $sb.AppendLine()
+    $null = $sb.AppendLine("## Experts")
+    foreach ($e in $experts) { $null = $sb.AppendLine("- [$($e.Rel)]($($e.Raw))") }
+    $null = $sb.AppendLine()
 }
 if ($include.Count -gt 0) {
-  $null = $sb.AppendLine("## Include")
-  foreach ($i in $include) { $null = $sb.AppendLine("- [$($i.Rel)]($($i.Raw))") }
-  $null = $sb.AppendLine()
+    $null = $sb.AppendLine("## Include")
+    foreach ($i in $include) { $null = $sb.AppendLine("- [$($i.Rel)]($($i.Raw))") }
+    $null = $sb.AppendLine()
 }
 if ($other.Count -gt 0) {
-  $null = $sb.AppendLine("## Other")
-  foreach ($o in $other) { $null = $sb.AppendLine("- [$($o.Rel)]($($o.Raw))") }
-  $null = $sb.AppendLine()
+    $null = $sb.AppendLine("## Other")
+    foreach ($o in $other) { $null = $sb.AppendLine("- [$($o.Rel)]($($o.Raw))") }
+    $null = $sb.AppendLine()
 }
 
-# 8) Zapis
-$sb.ToString() | Set-Content $outFile -Encoding UTF8
-Write-Host "Zapisano: $outFile"
+# 7) write file
+$md = $sb.ToString()
+Set-Content -Path $outFile -Value $md -Encoding UTF8
+Write-Host "[build-utf8-links] Written: $outFile"
+exit 0
