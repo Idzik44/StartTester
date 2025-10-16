@@ -1,7 +1,6 @@
 #ifndef __PATTERN_DETECTOR_MQH__
 #define __PATTERN_DETECTOR_MQH__
 
-
 #property strict
 
 #include <StartTester/Zmienne11.mqh>
