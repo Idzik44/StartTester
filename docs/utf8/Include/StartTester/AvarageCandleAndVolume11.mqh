@@ -24,7 +24,7 @@ datetime sequenceEndTime = 0;    // Zmienna przechowująca ostatni element w sek
 double minLow = 0;        // Minimalna cena w sekwencji
 double maxHigh = 0;       // Maksymalna cena w sekwencji
 
-// Funkcja do obliczenia średniej wysokości świecy
+
 double CalculateAverageCandleHeight(int candleToCheck)
 {
     double totalHeight = 0;
@@ -53,6 +53,7 @@ double CalculateAverageCandleHeight(int candleToCheck)
    double CandleHeightOC;
    double CandlePercentageOC;
    int PercentOfAvg;
+   
 
 void CalculateLastCandleHeight()
 {
@@ -72,55 +73,6 @@ void CalculateLastCandleHeight()
 // Funkcja do sprawdzania sekwencji małych świec
 bool sequenceActive = false;      // Czy aktualnie trwa sekwencja
 bool sequenceCompleted = false;  // Czy sekwencja została zakończona
-
-bool CheckSmallCandleSequence(double thresholdPercent, int requiredCount)
-{
-    if (PercentOfAvg <= thresholdPercent)
-    {
-        if (currentCandleCount == 0)
-        {
-            minLow = candleHistory[1].low;
-            maxHigh = candleHistory[1].high;
-            sequenceStartTime = candleHistory[1].time;
-            currentCandleCount = 1;
-            sequenceActive = true;
-        }
-        else
-        {
-            minLow = MathMin(minLow, candleHistory[1].low);
-            maxHigh = MathMax(maxHigh, candleHistory[1].high);
-            sequenceEndTime = candleHistory[1].time;
-            currentCandleCount++;
-        }
-    }
-    else
-    {
-        if (sequenceActive && currentCandleCount >= requiredCount)
-        {
-            sequenceCompleted = true;
-        }
-
-        sequenceActive = false;
-        currentCandleCount = 0;
-        sequenceStartTime = 0;
-        sequenceEndTime = 0;
-    }
-
-    return currentCandleCount >= requiredCount;
-}
-
-
-// Sprawdza, czy sekwencja została zakończona
-bool IsSequenceCompleted()
-{
-    if (sequenceCompleted)
-    {
-        sequenceCompleted = false; // Resetujemy flagę po odczytaniu
-        return true;
-    }
-
-    return false;
-}
 
 // Oblicz średni wolumen z ostatnich X świec
 double CalculateAverageVolume(int volumeCandles)

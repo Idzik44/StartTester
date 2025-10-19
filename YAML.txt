@@ -1,0 +1,3085 @@
+# ===========================
+# StartTester/AvarageCandleAndVolume11.mqh
+# ===========================
+file: StartTester/AvarageCandleAndVolume11.mqh
+
+extern_or_input_refs:
+  - { name: candleHistory, type: "MqlRates[]", from: "StartTester/CandleAndTransactionData11.mqh", access: "read" }
+  - { name: userThreshold, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+
+globals:
+  - { name: avgCandleHeight, type: double, init: null, role: "ostatnio wyliczona średnia wysokości świecy" }
+  - { name: threshold, type: double, init: null, role: "próg dla świec (procent od średniej); kopiowany z userThreshold" }
+  - { name: minLow, type: double, init: 0, role: "minimalna cena w sekwencji" }
+  - { name: maxHigh, type: double, init: 0, role: "maksymalna cena w sekwencji" }
+  - { name: CandleHeight, type: double, init: null, role: "wysokość świecy[1] (high-low)" }
+  - { name: CandlePercentage, type: double, init: null, role: "% wysokości świecy[1] vs avgCandleHeight" }
+  - { name: CandleHeightOC, type: double, init: null, role: "zasięg korpusu |open-close| świecy[1]" }
+  - { name: CandlePercentageOC, type: double, init: null, role: "% korpusu świecy[1] vs avgCandleHeight" }
+  - { name: PercentOfAvg, type: int, init: null, role: "procent wysokości świecy[1] względem średniej (zaokrąglony)" }
+
+functions:
+  - name: CalculateAverageCandleHeight
+    signature: "double CalculateAverageCandleHeight(int candleToCheck)"
+    description: "Liczy średnią wysokość (high-low) z ostatnich N świec; ustawia threshold=userThreshold."
+    reads:
+      - { var: candleHistory, how: "ArraySize(), .high, .low" }
+      - { var: userThreshold, how: "kopiowany do threshold" }
+    writes:
+      - { var: avgCandleHeight, how: "set" }
+      - { var: threshold, how: "set (z userThreshold)" }
+    calls: []
+    returns: "double (>= 0.00001)"
+
+  - name: CalculateLastCandleHeight
+    signature: "void CalculateLastCandleHeight()"
+    description: "Wylicza metryki świecy[1]: wysokość, korpus i ich procenty względem avgCandleHeight."
+    reads:
+      - { var: candleHistory[1], how: "open, close, high, low, time" }
+      - { var: avgCandleHeight, how: "read" }
+    writes:
+      - { var: CandleHeight, how: "set" }
+      - { var: CandlePercentage, how: "set" }
+      - { var: CandleHeightOC, how: "set" }
+      - { var: CandlePercentageOC, how: "set" }
+      - { var: PercentOfAvg, how: "set" }
+    calls: []
+    returns: "void"
+
+  - name: CalculateAverageVolume
+    signature: "double CalculateAverageVolume(int volumeCandles)"
+    description: "Średni tick_volume z ostatnich volumeCandles świec."
+    reads:
+      - { var: candleHistory, how: "ArraySize(), .tick_volume" }
+    writes: []
+    calls: []
+    returns: "double (0.0 gdy brak świec)"
+
+  - name: IsValidBreakoutCandle
+    signature: "bool IsValidBreakoutCandle(int index, double sizeMultiplierLocal, double volumeMultiplierLocal, int volumeBarsLocal)"
+    description: "Weryfikuje wybicie: duża świeca i wysoki wolumen względem średnich."
+    reads:
+      - { var: candleHistory[index], how: "high, low, tick_volume" }
+      - { var: avgCandleHeight, how: "read" }
+    writes: []
+    calls:
+      - { fn: CalculateAverageVolume, why: "wyznaczenie avgVolumeLocal" }
+    returns: "bool"
+
+
+
+# ===========================
+# StartTester/BuySellFunction11.mqh
+# ===========================
+file: StartTester/BuySellFunction11.mqh
+
+extern_or_input_refs:
+  - { name: activeOrdersAndPositions, type: "OrderPositionData[]", from: "StartTester/CandleAndTransactionData11.mqh", access: "read" }
+  - { name: RefreshOrderAndPositionData, type: "function", from: "StartTester/CandleAndTransactionData11.mqh", access: "call" }
+  - { name: CalculateSLAndTP, type: "function", from: "StartTester/Position_Size11.mqh", access: "call" }
+  - { name: CalculateLotSize, type: "function", from: "StartTester/Position_Size11.mqh", access: "call" }
+  - { name: trade, type: "CTrade object", from: "StartTester/Position_Size11.mqh", access: "call" }
+  - { name: inputSLMultiplier, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputSLPoints, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputTPMultiplier, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputExecuteMarginPoints, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputFixedLot, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputCalculationMode, type: "int (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputAccountRiskCapital, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputRiskPercentage, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: _Symbol, type: "string (platform)", from: "MQL5", access: "read" }
+  - { name: SymbolInfoDouble, type: "func (MQL5)", from: "MQL5", access: "call" }
+  - { name: SYMBOL_POINT, type: "enum (MQL5)", from: "MQL5", access: "read" }
+  - { name: ORDER_TIME_GTC, type: "enum (MQL5)", from: "MQL5", access: "read" }
+  - { name: ORDER_TYPE_BUY, type: "enum (MQL5)", from: "MQL5", access: "read" }
+  - { name: ORDER_TYPE_SELL, type: "enum (MQL5)", from: "MQL5", access: "read" }
+  - { name: ORDER_TYPE_BUY_STOP, type: "enum (MQL5)", from: "MQL5", access: "read" }
+  - { name: ORDER_TYPE_SELL_STOP, type: "enum (MQL5)", from: "MQL5", access: "read" }
+  - { name: POSITION_TYPE_BUY, type: "enum (MQL5)", from: "MQL5", access: "read" }
+  - { name: POSITION_TYPE_SELL, type: "enum (MQL5)", from: "MQL5", access: "read" }
+
+globals:
+  - { name: (none), type: "-", init: "-", role: "-" }
+
+functions:
+  - name: HasPendingOrOpenOrders
+    signature: "bool HasPendingOrOpenOrders(int orderType, ulong magicNumber)"
+    description: "Sprawdza istnienie aktywnych zleceń/pozycji dla bieżącego symbolu i magicNumber (grupuje typy buy/sell, w tym STOP/LIMIT)."
+    reads:
+      - { var: activeOrdersAndPositions[], how: "iteracja, porównanie .type, .symbol, .magic" }
+      - { var: _Symbol, how: "porównanie symbolu" }
+    writes: []
+    calls:
+      - { fn: RefreshOrderAndPositionData, why: "odświeżenie bufora zleceń/pozycji" }
+    returns: "bool"
+
+  - name: PlaceBuyStop
+    signature: "bool PlaceBuyStop(double price, int UseSLMethod, ulong magicNumber)"
+    description: "Składa BUY STOP; liczy SL/TP i lota; wymaga SL; sprawdza konflikty."
+    reads:
+      - { var: inputSLMultiplier, how: "parametry SL/TP" }
+      - { var: inputSLPoints, how: "parametry SL/TP" }
+      - { var: inputTPMultiplier, how: "parametry SL/TP" }
+      - { var: inputExecuteMarginPoints, how: "margines do ceny" }
+      - { var: inputFixedLot, how: "lot sizing" }
+      - { var: inputCalculationMode, how: "lot sizing" }
+      - { var: inputAccountRiskCapital, how: "lot sizing" }
+      - { var: inputRiskPercentage, how: "lot sizing" }
+      - { var: _Symbol, how: "symbol transakcji" }
+      - { var: SYMBOL_POINT, how: "krok ceny" }
+    writes: []
+    calls:
+      - { fn: HasPendingOrOpenOrders, why: "sprawdzenie konfliktów" }
+      - { fn: CalculateSLAndTP, why: "wyznaczenie SL/TP" }
+      - { fn: SymbolInfoDouble, why: "punkt, adjustedPrice" }
+      - { fn: CalculateLotSize, why: "wyznaczenie wolumenu" }
+      - { fn: trade.SetExpertMagicNumber, why: "ustawienie magic" }
+      - { fn: trade.BuyStop, why: "złożenie zlecenia" }
+    returns: "bool"
+
+  - name: PlaceSellStop
+    signature: "bool PlaceSellStop(double price, int UseSLMethod, ulong magicNumber)"
+    description: "Składa SELL STOP; liczy SL/TP i lota; wymaga SL; sprawdza konflikty."
+    reads:
+      - { var: inputSLMultiplier, how: "parametry SL/TP" }
+      - { var: inputSLPoints, how: "parametry SL/TP" }
+      - { var: inputTPMultiplier, how: "parametry SL/TP" }
+      - { var: inputExecuteMarginPoints, how: "margines do ceny" }
+      - { var: inputFixedLot, how: "lot sizing" }
+      - { var: inputCalculationMode, how: "lot sizing" }
+      - { var: inputAccountRiskCapital, how: "lot sizing" }
+      - { var: inputRiskPercentage, how: "lot sizing" }
+      - { var: _Symbol, how: "symbol transakcji" }
+      - { var: SYMBOL_POINT, how: "krok ceny" }
+    writes: []
+    calls:
+      - { fn: HasPendingOrOpenOrders, why: "sprawdzenie konfliktów" }
+      - { fn: CalculateSLAndTP, why: "wyznaczenie SL/TP" }
+      - { fn: SymbolInfoDouble, why: "punkt, adjustedPrice" }
+      - { fn: CalculateLotSize, why: "wyznaczenie wolumenu" }
+      - { fn: trade.SetExpertMagicNumber, why: "ustawienie magic" }
+      - { fn: trade.SellStop, why: "złożenie zlecenia" }
+    returns: "bool"
+
+  - name: PlaceBuy
+    signature: "bool PlaceBuy(int UseSLMethod, ulong magicNumber, double SLMultiplier, double SLPoints, double TPMultiplier, double FixedLot, int CalculationMode, double AccountRiskCapital, double RiskPercentage)"
+    description: "Składa zlecenie rynkowe BUY; liczy SL/TP i lota; sprawdza konflikty."
+    reads:
+      - { var: _Symbol, how: "symbol transakcji" }
+      - { var: SYMBOL_ASK, how: "cena ask" }
+    writes: []
+    calls:
+      - { fn: HasPendingOrOpenOrders, why: "sprawdzenie konfliktów" }
+      - { fn: SymbolInfoDouble, why: "odczyt ask" }
+      - { fn: CalculateSLAndTP, why: "wyznaczenie SL/TP" }
+      - { fn: CalculateLotSize, why: "wyznaczenie wolumenu" }
+      - { fn: trade.SetExpertMagicNumber, why: "ustawienie magic" }
+      - { fn: trade.Buy, why: "złożenie zlecenia" }
+    returns: "bool"
+
+  - name: PlaceSell
+    signature: "bool PlaceSell(int UseSLMethod, ulong magicNumber, double SLMultiplier, double SLPoints, double TPMultiplier, double FixedLot, int CalculationMode, double AccountRiskCapital, double RiskPercentage)"
+    description: "Składa zlecenie rynkowe SELL; liczy SL/TP i lota; sprawdza konflikty."
+    reads:
+      - { var: _Symbol, how: "symbol transakcji" }
+      - { var: SYMBOL_BID, how: "cena bid" }
+    writes: []
+    calls:
+      - { fn: RefreshOrderAndPositionData, why: "odświeżenie bufora" }
+      - { fn: HasPendingOrOpenOrders, why: "sprawdzenie konfliktów" }
+      - { fn: SymbolInfoDouble, why: "odczyt bid" }
+      - { fn: CalculateSLAndTP, why: "wyznaczenie SL/TP" }
+      - { fn: CalculateLotSize, why: "wyznaczenie wolumenu" }
+      - { fn: trade.SetExpertMagicNumber, why: "ustawienie magic" }
+      - { fn: trade.Sell, why: "złożenie zlecenia" }
+    returns: "bool"
+
+
+# ===========================
+# StartTester/CandleAndTransactionData11.mqh
+# ===========================
+file: StartTester/CandleAndTransactionData11.mqh
+
+extern_or_input_refs:
+  - { name: numCandlesToCheck, type: "int (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputRSIPeriod, type: "int (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: _Symbol, type: "string (platform)", from: "MQL5", access: "read" }
+  - { name: _Period, type: "ENUM_TIMEFRAMES (platform)", from: "MQL5", access: "read" }
+  - { name: PLATFORM_FUNCS, type: "MQL5 built-ins", list:
+      [ "ArraySetAsSeries", "CopyRates", "PeriodSeconds", "ArraySize",
+        "OrdersTotal", "OrderGetTicket", "OrderSelect",
+        "OrderGetString", "OrderGetInteger", "OrderGetDouble",
+        "PositionsTotal", "PositionGetTicket", "PositionSelectByTicket",
+        "PositionGetString", "PositionGetInteger", "PositionGetDouble",
+        "EnumToString", "TimeToString", "Print", "PrintFormat",
+        "iRSI", "IndicatorRelease", "ArrayResize", "ArrayInitialize",
+        "MathAbs", "MathMax" ] }
+
+globals:
+  - { name: candleHistory, type: "MqlRates[]", init: "empty", role: "bufor świec (ArraySetAsSeries=true; 0=najnowsza)" }
+  - { name: activeOrdersAndPositions, type: "OrderPositionData[]", init: "empty", role: "zlecenia oczekujące i pozycje otwarte dla bieżącego symbolu" }
+  - { name: rsiHandle, type: "int", init: "INVALID_HANDLE", role: "uchwyt wskaźnika RSI" }
+  - { name: customADX, type: "double[]", init: "zeros", role: "bufor obliczonego ADX" }
+  - { name: customPlusDI, type: "double[]", init: "zeros", role: "bufor +DI" }
+  - { name: customMinusDI, type: "double[]", init: "zeros", role: "bufor -DI" }
+
+types:
+  - name: OrderPositionData
+    kind: struct
+    fields:
+      [ ticket: ulong, type: int, price: double, sl: double, tp: double,
+        symbol: string, magic: long, isPending: bool, isOpen: bool, openTime: datetime ]
+    ctors:
+      - { signature: "OrderPositionData()", role: "domyślna inicjalizacja pól" }
+      - { signature: "OrderPositionData(const OrderPositionData& src)", role: "konstruktor kopiujący" }
+
+functions:
+  - name: RefreshCandleHistory
+    signature: "void RefreshCandleHistory()"
+    description: "Ustawia series i kopiuje do candleHistory najnowsze numCandlesToCheck świec; ostrzega gdy <50."
+    reads:
+      - { var: _Symbol, how: "dla CopyRates" }
+      - { var: PERIOD_CURRENT, how: "timeframe" }
+      - { var: numCandlesToCheck, how: "limit liczby świec" }
+    writes:
+      - { var: candleHistory, how: "ArraySetAsSeries + CopyRates (pełny refill)" }
+    calls:
+      - { fn: ArraySetAsSeries, from: "MQL5" }
+      - { fn: CopyRates, from: "MQL5" }
+      - { fn: Print, from: "MQL5", when: "gdy skopiowanych < 50" }
+    returns: "void"
+
+  - name: FindIndexByTime
+    signature: "int FindIndexByTime(datetime t)"
+    description: "Zwraca indeks świecy obejmującej czas t (przedział [start, start+tf))."
+    reads:
+      - { var: _Period, how: "ustalenie długości świecy przez PeriodSeconds" }
+      - { var: candleHistory, how: "iteracja .time" }
+    writes: []
+    calls:
+      - { fn: PeriodSeconds, from: "MQL5" }
+      - { fn: ArraySize, from: "MQL5" }
+    returns: "int (>=0 lub -1 gdy brak)"
+
+  - name: CommentCandleBarIndices
+    signature: "void CommentCandleBarIndices()"
+    description: "Testowo oblicza indeks dla czasu candleHistory[1] (Comment zakomentowany)."
+    reads:
+      - { var: candleHistory[1].time, how: "czas" }
+    writes: []
+    calls:
+      - { fn: FindIndexByTime, why: "mapowanie czasu na indeks" }
+    returns: "void"
+
+  - name: HasAnyOpenOrPendingOrder
+    signature: "bool HasAnyOpenOrPendingOrder(ulong magicNumber)"
+    description: "Sprawdza istnienie pending/open zleceń/pozycji na bieżącym symbolu i magicu."
+    reads:
+      - { var: activeOrdersAndPositions[], how: "po odświeżeniu" }
+      - { var: _Symbol, how: "dopasowanie symbolu" }
+    writes: []
+    calls:
+      - { fn: RefreshOrderAndPositionData, why: "wypełnienie bufora" }
+    returns: "bool"
+
+  - name: RefreshOrderAndPositionData
+    signature: "void RefreshOrderAndPositionData()"
+    description: "Zapełnia activeOrdersAndPositions[] danymi o zleceniach i pozycjach na _Symbol."
+    reads:
+      - { var: _Symbol, how: "filtr dla ORDER_SYMBOL/POSITION_SYMBOL" }
+    writes:
+      - { var: activeOrdersAndPositions, how: "ArrayResize + przypisania rekordów" }
+    calls:
+      - { fn: OrdersTotal/OrderGetTicket/OrderSelect/OrderGet*, from: "MQL5" }
+      - { fn: PositionsTotal/PositionGetTicket/PositionSelectByTicket/PositionGet*, from: "MQL5" }
+      - { fn: ArrayResize, from: "MQL5" }
+      - { fn: DebugPrintOrderData, why: "diagnostyka każdego rekordu" }
+    returns: "void"
+
+  - name: DebugPrintOrderData
+    signature: "void DebugPrintOrderData(const OrderPositionData &opd)"
+    description: "Opcjonalny log jednego rekordu; poprawne mapowanie enumów (ORDER vs POSITION)."
+    reads:
+      - { var: opd, how: "parametry rekordu" }
+    writes: []
+    calls:
+      - { fn: EnumToString, from: "MQL5" }
+      - { fn: TimeToString, from: "MQL5" }
+      - { fn: PrintFormat, from: "MQL5", when: "po odkomentowaniu" }
+    returns: "void"
+
+  - name: InitRSI
+    signature: "void InitRSI()"
+    description: "Tworzy uchwyt RSI jeśli inputRSIPeriod>0 i uchwyt nie istnieje."
+    reads:
+      - { var: inputRSIPeriod, how: "warunek" }
+      - { var: _Symbol, how: "dla iRSI" }
+    writes:
+      - { var: rsiHandle, how: "set (lub early-return bez zmian)" }
+    calls:
+      - { fn: iRSI, from: "MQL5" }
+      - { fn: Print, from: "MQL5", when: "gdy INVALID_HANDLE" }
+    returns: "void"
+
+  - name: ReleaseRSI
+    signature: "void ReleaseRSI()"
+    description: "Zwalnia uchwyt RSI jeśli aktywny i resetuje do INVALID_HANDLE."
+    reads:
+      - { var: rsiHandle, how: "warunek" }
+    writes:
+      - { var: rsiHandle, how: "set INVALID_HANDLE" }
+    calls:
+      - { fn: IndicatorRelease, from: "MQL5" }
+    returns: "void"
+
+  - name: ComputeCustomADX
+    signature: "void ComputeCustomADX(int period = 14)"
+    description: "Oblicza bufory customPlusDI/customMinusDI/customADX dla zadanej długości."
+    reads:
+      - { var: candleHistory, how: "dla high/low/close i obliczeń DM/TR" }
+    writes:
+      - { var: customADX, how: "ArrayResize + wypełnienie" }
+      - { var: customPlusDI, how: "ArrayResize + wypełnienie" }
+      - { var: customMinusDI, how: "ArrayResize + wypełnienie" }
+    calls:
+      - { fn: ArraySize/ArrayResize/ArrayInitialize, from: "MQL5" }
+      - { fn: MathAbs/MathMax, from: "MQL5" }
+    returns: "void"
+
+  - name: GetCustomADXAt
+    signature: "double GetCustomADXAt(int i)"
+    description: "Zwraca customADX[i] lub -1 gdy poza zakresem."
+    reads:
+      - { var: customADX, how: "odczyt elementu" }
+    writes: []
+    calls:
+      - { fn: ArraySize, from: "MQL5" }
+    returns: "double"
+
+  - name: GetCustomPlusDIAt
+    signature: "double GetCustomPlusDIAt(int i)"
+    description: "Zwraca customPlusDI[i] lub -1 gdy poza zakresem."
+    reads:
+      - { var: customPlusDI, how: "odczyt elementu" }
+    writes: []
+    calls:
+      - { fn: ArraySize, from: "MQL5" }
+    returns: "double"
+
+  - name: GetCustomMinusDIAt
+    signature: "double GetCustomMinusDIAt(int i)"
+    description: "Zwraca customMinusDI[i] lub -1 gdy poza zakresem."
+    reads:
+      - { var: customMinusDI, how: "odczyt elementu" }
+    writes: []
+    calls:
+      - { fn: ArraySize, from: "MQL5" }
+    returns: "double"
+
+
+# ===========================
+# StartTester/ClusterDetector11.mqh
+# ===========================
+file: StartTester/ClusterDetector11.mqh
+
+extern_or_input_refs:
+  - { name: candleHistory, type: "MqlRates[]", from: "StartTester/CandleAndTransactionData11.mqh", access: "read" }
+  - { name: CalculateAverageCandleHeight, type: "function", from: "StartTester/AvarageCandleAndVolume11.mqh", access: "call" }
+  - { name: _Symbol, type: "string (platform)", from: "MQL5", access: "read" }
+  - { name: PERIOD_CURRENT, type: "ENUM_TIMEFRAMES", from: "MQL5", access: "read" }
+  - { name: PLATFORM_FUNCS, type: "MQL5 built-ins", list:
+      [ "ArraySize", "MathMin", "MathMax", "TimeToString", "TimeCurrent",
+        "ColorToARGB", "StringFormat",
+        "ObjectCreate", "ObjectSetInteger",
+        "iATR", "iStdDev", "CopyBuffer",
+        "Print" ] }
+
+globals:
+  - { name: (none), type: "-", init: "-", role: "-" }
+
+types:
+  - name: CandleCluster
+    kind: struct
+    fields:
+      [ startIndex: int, endIndex: int, maxHigh: double, minLow: double, startTime: datetime, endTime: datetime ]
+  - name: ClusterDetector
+    kind: class
+    fields_private:
+      - { name: minClusterLength, type: int, role: "minimalna liczba świec w klastrze" }
+      - { name: maxClusterLength, type: int, role: "maksymalna liczba świec w klastrze" }
+      - { name: maxCandleRangeFactor, type: double, role: "maks. dopuszczalny zasięg świecy vs średnia" }
+      - { name: maxClusterATRFactor, type: double, role: "maks. dopuszczalny zasięg klastra vs ATR" }
+      - { name: liveClusterActive, type: bool, role: "flaga stanu live (niewykorzystana w logice wykrywania)" }
+      - { name: liveClusterStart, type: int, role: "start indeks bieżącego klastra live" }
+      - { name: liveClusterEnd, type: int, role: "koniec (niewykorzystywany przy rysowaniu live)" }
+      - { name: liveClusterHigh, type: double, role: "maks. high w klastrze live" }
+      - { name: liveClusterLow, type: double, role: "min. low w klastrze live" }
+      - { name: liveClusterCount, type: int, role: "liczba świec w klastrze live" }
+      - { name: liveClusterStartTime, type: datetime, role: "czas startu klastra live" }
+      - { name: useATRFilter, type: bool, role: "czy stosować filtr ATR" }
+      - { name: useVolumeFilter, type: bool, role: "czy stosować filtr wolumenu" }
+      - { name: useStdDevFilter, type: bool, role: "czy stosować filtr odchylenia" }
+
+functions:
+  - name: ClusterDetector::ClusterDetector
+    signature: "ClusterDetector(int minLen = 5, int maxLen = 12, double candleFactor = 0.8, double atrFactor = 3)"
+    description: "Ustawia progi/limity i resetuje stan detekcji live."
+    reads: []
+    writes:
+      - { var: this.minClusterLength, how: "set" }
+      - { var: this.maxClusterLength, how: "set" }
+      - { var: this.maxCandleRangeFactor, how: "set" }
+      - { var: this.maxClusterATRFactor, how: "set" }
+      - { var: this.liveCluster*, how: "reset wartości" }
+    calls: []
+    returns: "constructor"
+
+  - name: ClusterDetector::EnableATRFilter
+    signature: "void EnableATRFilter(bool enable)"
+    description: "Włącza/wyłącza filtr ATR."
+    reads: []
+    writes:
+      - { var: this.useATRFilter, how: "set" }
+    calls: []
+    returns: "void"
+
+  - name: ClusterDetector::EnableVolumeFilter
+    signature: "void EnableVolumeFilter(bool enable)"
+    description: "Włącza/wyłącza filtr wolumenu."
+    reads: []
+    writes:
+      - { var: this.useVolumeFilter, how: "set" }
+    calls: []
+    returns: "void"
+
+  - name: ClusterDetector::EnableStdDevFilter
+    signature: "void EnableStdDevFilter(bool enable)"
+    description: "Włącza/wyłącza filtr odchylenia standardowego."
+    reads: []
+    writes:
+      - { var: this.useStdDevFilter, how: "set" }
+    calls: []
+    returns: "void"
+
+  - name: ClusterDetector::DetectAndDrawHistoricalClusters
+    signature: "void DetectAndDrawHistoricalClusters()"
+    description: "Wyszukuje historyczne klastry w ostatnich ~100 świecach i rysuje je."
+    reads:
+      - { var: candleHistory, how: "ArraySize(), indeksy i .time" }
+      - { var: this.minClusterLength, how: "warunek minimalnej długości" }
+    writes: []
+    calls:
+      - { fn: DetectCluster, why: "walidacja potencjalnego klastra" }
+      - { fn: DrawClusterBox, why: "wizualizacja wykrytego klastra" }
+      - { fn: MathMin/ArraySize/Print/TimeToString/ColorToARGB, from: "MQL5" }
+    returns: "void"
+
+  - name: ClusterDetector::DetectLiveCluster
+    signature: "void DetectLiveCluster()"
+    description: "Detekcja klastra na żywo na świecy[1] z filtrami ATR/Volume/StdDev."
+    reads:
+      - { var: candleHistory[1], how: "high/low/time/tick_volume" }
+      - { var: this.maxCandleRangeFactor, how: "limit zasięgu świecy" }
+      - { var: this.minClusterLength, how: "warunek długości klastra" }
+      - { var: this.useATRFilter/useVolumeFilter/useStdDevFilter, how: "warunki filtrów" }
+      - { var: this.maxClusterATRFactor, how: "limit względem ATR" }
+    writes:
+      - { var: this.liveCluster*, how: "aktualizacja i reset w zależności od warunków" }
+    calls:
+      - { fn: CalculateAverageCandleHeight, from: "AvarageCandleAndVolume11.mqh" }
+      - { fn: CalculateATR, why: "filtr ATR" }
+      - { fn: CalculateAverageVolume, why: "filtr wolumenu" }
+      - { fn: CalculateStdDev, why: "filtr odchylenia" }
+      - { fn: DrawClusterBox, why: "rysowanie wykrytego klastra" }
+      - { fn: MathMax/MathMin/ArraySize/Print/TimeToString/ColorToARGB, from: "MQL5" }
+    returns: "void"
+
+  - name: ClusterDetector::DetectCluster
+    signature: "bool DetectCluster(int startIndex, CandleCluster &clusterOut)"
+    description: "Historyczna detekcja i walidacja klastra z filtrami; uzupełnia clusterOut."
+    reads:
+      - { var: candleHistory, how: "high/low/time/tick_volume" }
+      - { var: this.minClusterLength, how: "warunek min" }
+      - { var: this.maxClusterLength, how: "limit pętli" }
+      - { var: this.maxCandleRangeFactor, how: "limit zasięgu świecy" }
+      - { var: this.useATRFilter/useVolumeFilter/useStdDevFilter, how: "filtry" }
+      - { var: this.maxClusterATRFactor, how: "limit ATR" }
+    writes:
+      - { var: clusterOut, how: "wypełnienie pól w przypadku sukcesu" }
+    calls:
+      - { fn: CalculateAverageCandleHeight, from: "AvarageCandleAndVolume11.mqh" }
+      - { fn: CalculateATR, why: "filtr ATR" }
+      - { fn: CalculateAverageVolume, why: "filtr wolumenu" }
+      - { fn: CalculateStdDev, why: "filtr odchylenia" }
+      - { fn: MathMax/MathMin/ArraySize, from: "MQL5" }
+    returns: "bool"
+
+  - name: ClusterDetector::DrawClusterBox
+    signature: "void DrawClusterBox(const CandleCluster &cluster, color clr)"
+    description: "Rysuje prostokąt (OBJ_RECTANGLE) oznaczający przedział klastra."
+    reads:
+      - { var: cluster, how: "start/end time, maxHigh, minLow" }
+    writes: []
+    calls:
+      - { fn: TimeCurrent/TimeToString/StringFormat/ObjectCreate/ObjectSetInteger/Print, from: "MQL5" }
+    returns: "void"
+
+  - name: ClusterDetector::CalculateATR
+    signature: "double CalculateATR(int period, int index)"
+    description: "Zwraca ATR z iATR (1 próbka od pozycji index)."
+    reads:
+      - { var: _Symbol/PERIOD_CURRENT, how: "parametry wskaźnika" }
+    writes: []
+    calls:
+      - { fn: iATR/CopyBuffer, from: "MQL5" }
+    returns: "double"
+
+  - name: ClusterDetector::CalculateStdDev
+    signature: "double CalculateStdDev(int period, int index)"
+    description: "Zwraca odchylenie standardowe (iStdDev, SMA, PRICE_CLOSE)."
+    reads:
+      - { var: _Symbol/PERIOD_CURRENT, how: "parametry wskaźnika" }
+    writes: []
+    calls:
+      - { fn: iStdDev/CopyBuffer, from: "MQL5" }
+    returns: "double"
+
+  - name: ClusterDetector::CalculateAverageVolume
+    signature: "double CalculateAverageVolume(int period)"
+    description: "Średni tick_volume z candleHistory[1..period]."
+    reads:
+      - { var: candleHistory, how: "tick_volume" }
+    writes: []
+    calls:
+      - { fn: ArraySize, from: "MQL5" }
+    returns: "double (0.0 gdy brak danych)"
+
+# ===========================
+# StartTester/ExitEngine.mqh
+# ===========================
+file: StartTester/ExitEngine.mqh
+
+extern_or_input_refs:
+  - { name: Exit_HYB_TP1_R, type: "double (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+  - { name: Exit_HYB_BE_After_R, type: "double (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+  - { name: Exit_HYB_TrailATR_K, type: "double (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+  - { name: Exit_HYB_TimeStop_Bars, type: "int (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+  - { name: Exit_HYB_TimeStop_MinR, type: "double (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+  - { name: Exit_HYB_PartialFrac, type: "double (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+  - { name: DebugExitOptimizer, type: "bool (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+  - { name: DebugExit_ATR, type: "bool (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+  - { name: DebugExit_Swing, type: "bool (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+  - { name: DebugExit_Hybrid, type: "bool (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+  - { name: DebugExit_Heartbeat, type: "bool (input)", from: "StartTester/ExitEngine.mqh", access: "read" }
+
+  - { name: Exit_ATR_K_Default, type: "double (extern/input)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: Exit_ATR_Period, type: "int (extern/input)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: Exit_Swing_N_Default, type: "int (extern/input)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: Exit_Swing_OffsetPts, type: "int (extern/input)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: Exit_EpsilonGreedy, type: "double (extern/input)", from: "StartTester/Zmienne11.mqh", access: "read" }
+
+  - { name: candleHistory, type: "MqlRates[]", from: "StartTester/CandleAndTranactionData11.mqh", access: "read" }
+  - { name: GetStandardizedRange, type: "function", from: "StartTester/RangeAndVolumeAnalyzer11.mqh", access: "call" }
+  - { name: GetStandardizedVolume, type: "function", from: "StartTester/RangeAndVolumeAnalyzer11.mqh", access: "call" }
+
+  - { name: DefaultRegimeThresholds, type: "function", from: "StartTester/RegimeThresholds.mqh", access: "call" }
+  - { name: LoadRegimeThresholds, type: "function", from: "StartTester/RegimeThresholds.mqh", access: "call" }
+
+  - { name: _Symbol, type: "string (platform)", from: "MQL5", access: "read" }
+  - { name: _Period, type: "ENUM_TIMEFRAMES (platform)", from: "MQL5", access: "read" }
+  - { name: PLATFORM_FUNCS, type: "MQL5 built-ins", list:
+      [ "iADX", "iATR", "CopyBuffer", "MathAbs", "MathFloor", "MathMax", "MathSrand", "MathRand",
+        "ArraySize", "NormalizeDouble", "Print", "PrintFormat", "TimeToString", "PeriodSeconds",
+        "SymbolInfoDouble", "SymbolInfoInteger",
+        "PositionsTotal", "PositionSelectByTicket", "PositionSelect",
+        "PositionGetInteger", "PositionGetDouble", "PositionGetString" ] }
+
+globals:
+  - { name: __exitTrade, type: "CTrade", init: "default", role: "obiekt do modyfikacji/zamykania pozycji" }
+  - { name: __adxHandle, type: int, init: -1, role: "cache uchwytu ADX" }
+  - { name: __adxPeriodCached, type: int, init: -1, role: "cache ostatniego period dla ADX" }
+  - { name: __bestReady, type: bool, init: false, role: "czy dostępne najlepsze polityki/parametry per-reżim" }
+  - { name: __bestPolicy[NUM_REGIMES], type: ExitPolicy[], init: "undefined", role: "najlepsza polityka dla reżimu" }
+  - { name: __bestATR[NUM_REGIMES], type: ExitParamsATR[], init: "undefined", role: "najlepsze parametry ATR" }
+  - { name: __bestSW[NUM_REGIMES], type: ExitParamsSW[], init: "undefined", role: "najlepsze parametry SWING" }
+  - { name: __bestHYB[NUM_REGIMES], type: ExitParamsHYB[], init: "undefined", role: "najlepsze parametry HYBRID" }
+  - { name: __RD_LoadedOnce, type: bool, init: false, role: "czy progi reżimów zostały już załadowane" }
+  - { name: __RD_ZLow_Override, type: double, init: -1.0, role: "override zLow (Z-score low)" }
+  - { name: __RD_ZHigh_Override, type: double, init: -1.0, role: "override zHigh (Z-score high)" }
+  - { name: __RD_ADXStrong_Ovr, type: double, init: -1.0, role: "override próg ADX strong" }
+  - { name: __RD_DIGap_Override, type: int, init: -1, role: "override minimalnej różnicy DI" }
+  - { name: __RD_ZHyst_Override, type: double, init: -1.0, role: "override histerezy Z" }
+  - { name: __RD_ADXHyst_Override, type: double, init: -1.0, role: "override histerezy ADX" }
+  - { name: __bindings[32], type: "TicketExitBinding[]", init: "unused", role: "powiązania ticket→exit-config" }
+  - { name: __bindingsCount, type: int, init: 0, role: "liczba aktywnych powiązań" }
+
+enums:
+  - { name: ExitPolicy, values: [EXIT_ATR, EXIT_SWING, EXIT_HYBRID], role: "rodzaj polityki wyjścia" }
+
+types:
+  - name: ExitParamsATR
+    kind: struct
+    fields: [ kATR: double, atrPeriod: int ]
+  - name: ExitParamsSW
+    kind: struct
+    fields: [ swingN: int, offsetPts: int ]
+  - name: ExitParamsHYB
+    kind: struct
+    fields: [ tp1R: double, beAfterR: double, trailATRk: double, timeStopBars: int, timeStopMinR: double, partialFrac: double ]
+  - name: ExitConfig
+    kind: struct
+    fields: [ policy: ExitPolicy, atr: ExitParamsATR, sw: ExitParamsSW, hyb: ExitParamsHYB ]
+  - name: TicketExitBinding
+    kind: struct
+    fields: [ ticket: ulong, cfg: ExitConfig, used: bool, oneR: double, partialDone: bool, entryTime: datetime, lastLogBar: datetime ]
+
+functions:
+  - name: Pts
+    signature: "inline double Pts(double pts)"
+    description: "Konwersja punktów na wartość cenową."
+    reads: [ { var: _Point, how: "mnożnik" } ]
+    writes: []
+    calls: []
+    returns: "double"
+
+  - name: EnsureAdxHandle
+    signature: "bool EnsureAdxHandle(int period)"
+    description: "Zapewnia ważny uchwyt ADX dla period (cache)."
+    reads: [ { var: __adxHandle }, { var: __adxPeriodCached }, { var: _Symbol }, { var: _Period } ]
+    writes: [ { var: __adxHandle }, { var: __adxPeriodCached } ]
+    calls: [ { fn: iADX } ]
+    returns: "bool"
+
+  - name: ADX_Value
+    signature: "double ADX_Value(int barShift, int period=14)"
+    description: "Czyta bufor ADX (linia główna)."
+    reads: [ { var: __adxHandle } ]
+    writes: []
+    calls: [ { fn: EnsureAdxHandle }, { fn: CopyBuffer } ]
+    returns: "double"
+
+  - name: DIPlus_Value
+    signature: "double DIPlus_Value(int barShift, int period=14)"
+    description: "Czyta bufor DI+."
+    reads: [ { var: __adxHandle } ]
+    writes: []
+    calls: [ { fn: EnsureAdxHandle }, { fn: CopyBuffer } ]
+    returns: "double"
+
+  - name: DIMinus_Value
+    signature: "double DIMinus_Value(int barShift, int period=14)"
+    description: "Czyta bufor DI-."
+    reads: [ { var: __adxHandle } ]
+    writes: []
+    calls: [ { fn: EnsureAdxHandle }, { fn: CopyBuffer } ]
+    returns: "double"
+
+  - name: ATR_Value
+    signature: "double ATR_Value(int shift, int period)"
+    description: "Wartość ATR (cache uchwytu per period)."
+    reads: [ { var: _Symbol }, { var: _Period } ]
+    writes: []
+    calls: [ { fn: iATR }, { fn: CopyBuffer } ]
+    returns: "double"
+
+  - name: ExitEngine_SetBestForRegime
+    signature: "void ExitEngine_SetBestForRegime(int regime, ExitPolicy pol, const ExitParamsATR &a, const ExitParamsSW &s, const ExitParamsHYB &h)"
+    description: "Ustawia najlepszą politykę i parametry dla reżimu."
+    reads: [ { var: __bestPolicy[] }, { var: __bestATR[] }, { var: __bestSW[] }, { var: __bestHYB[] } ]
+    writes: [ { var: __bestPolicy[] }, { var: __bestATR[] }, { var: __bestSW[] }, { var: __bestHYB[] }, { var: __bestReady } ]
+    calls: []
+    returns: "void"
+
+  - name: RD_UseVolumeFusion
+    signature: "bool RD_UseVolumeFusion()"
+    description: "Czy łączyć Z-range z Z-volume przy detekcji wolumenowej."
+    reads: []
+    writes: []
+    calls: []
+    returns: "bool"
+
+  - name: RD_Z_Hyst
+    signature: "double RD_Z_Hyst()"
+    description: "Domyślna histereza Z (fallback)."
+    reads: []
+    writes: []
+    calls: []
+    returns: "double"
+
+  - name: RD_ADX_Hyst
+    signature: "double RD_ADX_Hyst()"
+    description: "Domyślna histereza ADX (fallback)."
+    reads: []
+    writes: []
+    calls: []
+    returns: "double"
+
+  - name: RD_DI_MinGap
+    signature: "int RD_DI_MinGap()"
+    description: "Domyślny minimalny gap DI (fallback)."
+    reads: []
+    writes: []
+    calls: []
+    returns: "int"
+
+  - name: RD_SetOverrides
+    signature: "void RD_SetOverrides(double zLow,double zHigh,double adxStrong,int diGap,double zHyst,double adxHyst)"
+    description: "Ustawia nadpisania progów reżimów."
+    reads: []
+    writes: [ { var: __RD_* }, { var: __RD_LoadedOnce } ]
+    calls: []
+    returns: "void"
+
+  - name: __RD_EnsureThresholds
+    signature: "void __RD_EnsureThresholds()"
+    description: "Lazy load progów reżimów z CSV i ustawienie override."
+    reads: [ { var: __RD_LoadedOnce } ]
+    writes: [ { var: __RD_LoadedOnce }, { var: __RD_* } ]
+    calls: [ { fn: DefaultRegimeThresholds }, { fn: LoadRegimeThresholds }, { fn: RD_SetOverrides }, { fn: PrintFormat } ]
+    returns: "void"
+
+  - name: RD_GetZLow
+    signature: "double RD_GetZLow()"
+    description: "Zwraca próg ZLow (override → default)."
+    reads: [ { var: __RD_ZLow_Override } ]
+    writes: []
+    calls: [ { fn: __RD_EnsureThresholds }, { fn: DefaultRegimeThresholds } ]
+    returns: "double"
+
+  - { name: RD_GetZHigh, signature: "double RD_GetZHigh()", description: "Zwraca próg ZHigh (override → default).", reads: [ { var: __RD_ZHigh_Override } ], writes: [], calls: [ { fn: __RD_EnsureThresholds }, { fn: DefaultRegimeThresholds } ], returns: "double" }
+  - { name: RD_GetADXStrong, signature: "double RD_GetADXStrong()", description: "Zwraca próg ADX strong (override → default).", reads: [ { var: __RD_ADXStrong_Ovr } ], writes: [], calls: [ { fn: __RD_EnsureThresholds }, { fn: DefaultRegimeThresholds } ], returns: "double" }
+  - { name: RD_GetDIGap, signature: "int RD_GetDIGap()", description: "Zwraca minimalny gap DI (override → default fallback).", reads: [ { var: __RD_DIGap_Override } ], writes: [], calls: [ { fn: __RD_EnsureThresholds }, { fn: RD_DI_MinGap } ], returns: "int" }
+  - { name: RD_GetZHyst, signature: "double RD_GetZHyst()", description: "Zwraca histerezę Z (override → default fallback).", reads: [ { var: __RD_ZHyst_Override } ], writes: [], calls: [ { fn: __RD_EnsureThresholds }, { fn: RD_Z_Hyst } ], returns: "double" }
+  - { name: RD_GetADXHyst, signature: "double RD_GetADXHyst()", description: "Zwraca histerezę ADX (override → default fallback).", reads: [ { var: __RD_ADXHyst_Override } ], writes: [], calls: [ { fn: __RD_EnsureThresholds }, { fn: RD_ADX_Hyst } ], returns: "double" }
+
+  - name: __VolBucket_WithHysteresis
+    signature: "int __VolBucket_WithHysteresis(int shift)"
+    description: "Kubełkowanie wolumenowo-zasięgowe z histerezą (fusion)."
+    reads: []
+    writes: []
+    calls: [ { fn: RD_GetZLow }, { fn: RD_GetZHyst }, { fn: RD_GetZHigh }, { fn: RD_UseVolumeFusion }, { fn: GetStandardizedRange }, { fn: GetStandardizedVolume }, { fn: MathAbs } ]
+    returns: "int (0..2)"
+
+  - name: __TrendBucket
+    signature: "int __TrendBucket(int shift)"
+    description: "Kubełkowanie trendu na bazie ADX/DI + histereza."
+    reads: []
+    writes: []
+    calls: [ { fn: RD_GetADXStrong }, { fn: RD_GetADXHyst }, { fn: RD_GetDIGap }, { fn: ADX_Value }, { fn: DIPlus_Value }, { fn: DIMinus_Value } ]
+    returns: "int (0..2)"
+
+  - name: DetectRegimeKey
+    signature: "int DetectRegimeKey(int barShift)"
+    description: "Łączy kubełki trend/vol w klucz reżimu 0..8."
+    reads: []
+    writes: []
+    calls: [ { fn: __TrendBucket }, { fn: __VolBucket_WithHysteresis } ]
+    returns: "int"
+
+  - name: RegimeToString
+    signature: "string RegimeToString(int regimeKey)"
+    description: "Konwersja klucza reżimu do 'UP|HIGH' itd."
+    reads: []
+    writes: []
+    calls: []
+    returns: "string"
+
+  - name: DefaultConfig
+    signature: "ExitConfig DefaultConfig()"
+    description: "Domyślna polityka i parametry (gł. HYBRID)."
+    reads: [ { var: Exit_ATR_K_Default }, { var: Exit_ATR_Period }, { var: Exit_Swing_N_Default }, { var: Exit_Swing_OffsetPts }, { var: Exit_HYB_* } ]
+    writes: []
+    calls: []
+    returns: "ExitConfig"
+
+  - name: __rand01
+    signature: "double __rand01()"
+    description: "Los z [0,1]; używane do epsilon-greedy."
+    reads: []
+    writes: []
+    calls: [ { fn: MathRand } ]
+    returns: "double"
+
+  - name: ChooseExitForRegime
+    signature: "ExitConfig ChooseExitForRegime(int regime)"
+    description: "Wybór polityki (eksploracja/eksploatacja, bestReady lub fallback)."
+    reads: [ { var: __bestReady }, { var: __bestPolicy[] }, { var: __bestATR[] }, { var: __bestSW[] }, { var: __bestHYB[] }, { var: Exit_EpsilonGreedy }, { var: DebugExitOptimizer } ]
+    writes: []
+    calls: [ { fn: __rand01 }, { fn: DefaultConfig }, { fn: MathFloor }, { fn: PrintFormat } ]
+    returns: "ExitConfig"
+
+  - name: FindBindingIndex
+    signature: "int FindBindingIndex(ulong ticket)"
+    description: "Wyszukuje indeks powiązania dla biletu."
+    reads: [ { var: __bindings[] }, { var: __bindingsCount } ]
+    writes: []
+    calls: []
+    returns: "int"
+
+  - name: BindExitToTicket
+    signature: "void BindExitToTicket(ulong ticket, const ExitConfig &cfg)"
+    description: "Zakłada powiązanie ticket→config; oblicza 1R/entryTime."
+    reads: [ { var: candleHistory }, { var: Exit_ATR_Period } ]
+    writes: [ { var: __bindings[] }, { var: __bindingsCount } ]
+    calls: [ { fn: FindBindingIndex }, { fn: PositionSelectByTicket }, { fn: PositionGet* }, { fn: ATR_Value }, { fn: PrintFormat }, { fn: MathMax }, { fn: MathAbs } ]
+    returns: "void"
+
+  - name: GetExitForTicket
+    signature: "bool GetExitForTicket(ulong ticket, ExitConfig &out)"
+    description: "Pobiera zbindowaną konfigurację wyjścia dla biletu."
+    reads: [ { var: __bindings[] }, { var: __bindingsCount } ]
+    writes: []
+    calls: []
+    returns: "bool"
+
+  - name: UnbindTicket
+    signature: "void UnbindTicket(ulong ticket)"
+    description: "Odwiesza powiązanie biletu."
+    reads: [ { var: __bindings[] }, { var: __bindingsCount } ]
+    writes: [ { var: __bindings[].used } ]
+    calls: []
+    returns: "void"
+
+  - name: ApplyExit_ATR
+    signature: "bool ApplyExit_ATR(ulong ticket, bool isLong, const ExitParamsATR &p)"
+    description: "Trail SL wg ATR (chandelier)."
+    reads: [ { var: candleHistory }, { var: DebugExit_ATR } ]
+    writes: []
+    calls: [ { fn: ATR_Value }, { fn: PositionSelectByTicket }, { fn: PositionGet* }, { fn: __exitTrade.PositionModify }, { fn: PrintFormat } ]
+    returns: "bool"
+
+  - name: HighestHigh
+    signature: "double HighestHigh(int fromShift, int bars)"
+    description: "Najwyższe high w oknie."
+    reads: [ { var: candleHistory } ]
+    writes: []
+    calls: [ { fn: ArraySize } ]
+    returns: "double"
+
+  - name: LowestLow
+    signature: "double LowestLow(int fromShift, int bars)"
+    description: "Najniższe low w oknie."
+    reads: [ { var: candleHistory } ]
+    writes: []
+    calls: [ { fn: ArraySize } ]
+    returns: "double"
+
+  - name: ApplyExit_Swing
+    signature: "bool ApplyExit_Swing(ulong ticket, bool isLong, const ExitParamsSW &p)"
+    description: "Trail SL pod/ponad lokalne ekstrema + offset."
+    reads: [ { var: DebugExit_Swing } ]
+    writes: []
+    calls: [ { fn: HighestHigh }, { fn: LowestLow }, { fn: Pts }, { fn: PositionSelectByTicket }, { fn: PositionGet* }, { fn: __exitTrade.PositionModify }, { fn: PrintFormat } ]
+    returns: "bool"
+
+  - name: LogHybridHeartbeat
+    signature: "void LogHybridHeartbeat(ulong ticket, const ExitParamsHYB &p, double oneR, bool isLong)"
+    description: "Diagnostyka hybrydy – jednokrotnie na bar (log)."
+    reads: [ { var: candleHistory }, { var: DebugExit_Heartbeat }, { var: __bindings[] } ]
+    writes: [ { var: __bindings[].lastLogBar } ]
+    calls: [ { fn: FindBindingIndex }, { fn: PositionSelectByTicket }, { fn: PositionGet* }, { fn: SymbolInfoDouble }, { fn: ATR_Value }, { fn: PrintFormat }, { fn: TimeToString } ]
+    returns: "void"
+
+  - name: ApplyExit_Hybrid
+    signature: "bool ApplyExit_Hybrid(ulong ticket, bool isLong, const ExitParamsHYB &p)"
+    description: "Hybryda: partial, BE, ATR trail, time-stop."
+    reads: [ { var: candleHistory }, { var: DebugExit_Hybrid }, { var: DebugExit_Heartbeat } ]
+    writes: []
+    calls: [ { fn: PositionSelectByTicket }, { fn: PositionGet* }, { fn: SymbolInfoDouble }, { fn: SymbolInfoInteger }, { fn: PeriodSeconds }, { fn: ATR_Value }, { fn: __exitTrade.PositionClose }, { fn: __exitTrade.PositionClosePartial }, { fn: __exitTrade.PositionModify }, { fn: NormalizeDouble }, { fn: PrintFormat }, { fn: MathMax }, { fn: MathFloor }, { fn: MathAbs } ]
+    returns: "bool"
+
+  - name: ManageOpenPositions
+    signature: "void ManageOpenPositions()"
+    description: "Obsługa pozycji: wybór polityki i zastosowanie."
+    reads: [ { var: _Symbol } ]
+    writes: []
+    calls: [ { fn: PositionsTotal }, { fn: CPositionInfo.SelectByIndex }, { fn: DetectRegimeKey }, { fn: ChooseExitForRegime }, { fn: BindExitToTicket }, { fn: GetExitForTicket }, { fn: ApplyExit_ATR }, { fn: ApplyExit_Swing }, { fn: ApplyExit_Hybrid } ]
+    returns: "void"
+
+  - name: BindPolicyForSymbolPosition
+    signature: "void BindPolicyForSymbolPosition(const string symbol)"
+    description: "Binduje politykę dla aktualnej pozycji na symbolu."
+    reads: [ { var: DebugExitOptimizer } ]
+    writes: []
+    calls: [ { fn: PositionSelect }, { fn: PositionGetInteger }, { fn: DetectRegimeKey }, { fn: ChooseExitForRegime }, { fn: BindExitToTicket }, { fn: PrintFormat } ]
+    returns: "void"
+
+# ===========================
+# StartTester/ExitManager.mqh
+# ===========================
+file: StartTester/ExitManager.mqh
+
+extern_or_input_refs:
+  - { name: UseExitManager, type: "bool (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: UseBreakeven, type: "bool (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: BE_Trigger_R, type: "double (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: BE_OffsetPoints, type: "int (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: UsePartialTP, type: "bool (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: PartialTP_R, type: "double (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: PartialTP_Percent, type: "double (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: UseTrailing, type: "TrailMethod (input)", from: "StartTester/ExitTypes.mqh", access: "read" }
+  - { name: ATR_Period, type: "int (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: ATR_Multiplier, type: "double (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: TrailStepEveryPoints, type: "int (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: TrailStepLockPoints, type: "int (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: UseTimeStop, type: "bool (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: MaxBarsInTrade, type: "int (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: UseOppositeDIExit, type: "bool (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: ExitAdxMin, type: "int (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: ExitDiMin, type: "int (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: ExitDiDiff, type: "int (input)", from: "ExitManager.mqh", access: "read" }
+  - { name: UseSessionCloseExit, type: "bool (input)", from: "ExitManager.mqh", access: "read" }
+
+  - { name: candleHistory, type: "MqlRates[]", from: "StartTester/CandleAndTranactionData11.mqh", access: "read" }
+  - { name: GetCustomADXAt, type: "function", from: "StartTester/CandleAndTranactionData11.mqh", access: "call" }
+  - { name: GetCustomPlusDIAt, type: "function", from: "StartTester/CandleAndTranactionData11.mqh", access: "call" }
+  - { name: GetCustomMinusDIAt, type: "function", from: "StartTester/CandleAndTranactionData11.mqh", access: "call" }
+
+  - { name: RegimeFeatures, type: "struct", from: "StartTester/RegimeDetector.mqh", access: "read" }
+  - { name: MarketRegime, type: "enum", from: "StartTester/RegimeDetector.mqh", access: "read" }
+  - { name: GetRegimeFeatures, type: "function", from: "StartTester/RegimeDetector.mqh", access: "call" }
+  - { name: ClassifyRegime, type: "function", from: "StartTester/RegimeDetector.mqh", access: "call" }
+
+  - { name: ExitParams, type: "struct", from: "StartTester/ExitPolicy.mqh", access: "read" }
+  - { name: LoadBestExitForRegime, type: "function", from: "StartTester/ExitPolicy.mqh", access: "call" }
+  - { name: CopyExitParams, type: "function", from: "StartTester/ExitPolicy.mqh", access: "call" }
+  - { name: CanPartialByLot, type: "function", from: "StartTester/ExitPolicy.mqh", access: "call" }
+  - { name: RD_ATR, type: "function", from: "StartTester/RegimeDetector.mqh or RangeAndVolumeAnalyzer11.mqh", access: "call" }
+
+  - { name: _Symbol, type: "string (platform)", from: "MQL5", access: "read" }
+  - { name: PLATFORM_FUNCS, type: "MQL5 built-ins", list:
+      [ "ArraySize", "ArrayResize", "MathAbs", "MathMax", "MathFloor",
+        "SymbolInfoDouble", "PositionsTotal", "PositionGetTicket", "PositionSelectByTicket",
+        "PositionGetString", "PositionGetInteger", "PositionGetDouble" ] }
+
+globals:
+  - { name: g_exitBindings, type: "ExitBinding[]", init: "empty", role: "mapowanie ticket→params+regime" }
+  - { name: tradeExit, type: "CTrade", init: "default", role: "operacje na pozycjach (modify/close)" }
+  - { name: g_partialDoneTickets, type: "ulong[]", init: "empty", role: "lista biletów z wykonanym partial TP (jednorazowość)" }
+
+types:
+  - name: ExitBinding
+    kind: struct
+    fields:
+      [ ticket: ulong, params: ExitParams, regime: MarketRegime, initialized: bool ]
+
+functions:
+  - { name: FindBinding, signature: "int FindBinding(ulong ticket)", description: "Zwraca indeks istniejącego wiązania dla ticket lub -1.", reads: [ { var: g_exitBindings } ], writes: [], calls: [], returns: "int" }
+
+  - name: EnsureBindingForPosition
+    signature: "void EnsureBindingForPosition(ulong ticket, bool isBuy)"
+    description: "Tworzy/odświeża wiązanie dla pozycji: klasyfikuje reżim, ładuje najlepsze parametry, wyłącza partial gdy lot nie pozwala."
+    reads:
+      - { var: g_exitBindings, how: "sprawdzenie istniejącego slotu" }
+      - { var: candleHistory, how: "pośrednio przez GetRegimeFeatures" }
+    writes:
+      - { var: g_exitBindings, how: "ArrayResize + przypisania pól" }
+    calls:
+      - { fn: FindBinding }
+      - { fn: GetRegimeFeatures }
+      - { fn: ClassifyRegime }
+      - { fn: LoadBestExitForRegime }
+      - { fn: CanPartialByLot }
+      - { fn: CopyExitParams }
+
+  - { name: PartialAlreadyDone, signature: "bool PartialAlreadyDone(ulong ticket)", description: "Czy partial TP był już wykonany dla biletu.", reads: [ { var: g_partialDoneTickets } ], writes: [], calls: [], returns: "bool" }
+  - { name: MarkPartialDone, signature: "void MarkPartialDone(ulong ticket)", description: "Oznacza wykonanie partial TP (jednorazowość).", reads: [], writes: [ { var: g_partialDoneTickets } ], calls: [ { fn: ArrayResize } ], returns: "void" }
+
+  - name: GetATR
+    signature: "double GetATR(int period, int index=1)"
+    description: "Lokalny prosty ATR na bazie candleHistory."
+    reads: [ { var: candleHistory } ]
+    writes: []
+    calls: [ { fn: ArraySize }, { fn: MathAbs }, { fn: MathMax } ]
+    returns: "double"
+
+  - name: GetPositionByMagic
+    signature: "bool GetPositionByMagic(ulong magic, string symbol, ulong &ticket, bool &isBuy, double &entry, double &sl, double &tp, datetime &timeOpen)"
+    description: "Wyszukuje aktywną pozycję wg magic i symbolu, zwraca podstawowe pola."
+    reads: []
+    writes: []
+    calls:
+      - { fn: PositionsTotal }
+      - { fn: PositionGetTicket }
+      - { fn: PositionSelectByTicket }
+      - { fn: PositionGetString/Integer/Double }
+    returns: "bool"
+
+  - name: BarsSince
+    signature: "int BarsSince(datetime t)"
+    description: "Liczba zamkniętych świec od czasu t."
+    reads: [ { var: candleHistory } ]
+    writes: []
+    calls: [ { fn: ArraySize } ]
+    returns: "int"
+
+  - name: MaybeMoveToBreakeven
+    signature: "void MaybeMoveToBreakeven(ulong ticket, bool isBuy, double entry, double &sl)"
+    description: "Przesuwa SL do BE po osiągnięciu progu R (globalne UseBreakeven/BE_*)."
+    reads: [ { var: UseBreakeven }, { var: BE_Trigger_R }, { var: BE_OffsetPoints }, { var: _Symbol } ]
+    writes: []
+    calls: [ { fn: SymbolInfoDouble }, { fn: PositionGetDouble }, { fn: tradeExit.PositionModify }, { fn: MathAbs } ]
+    returns: "void"
+
+  - name: MaybePartialTP
+    signature: "void MaybePartialTP(ulong ticket, bool isBuy, double entry, double sl)"
+    description: "Częściowe zamknięcie po osiągnięciu R (globalne UsePartialTP/PartialTP_*)."
+    reads: [ { var: UsePartialTP }, { var: PartialTP_R }, { var: PartialTP_Percent }, { var: _Symbol }, { var: g_partialDoneTickets } ]
+    writes: [ { var: g_partialDoneTickets, how: "MarkPartialDone" } ]
+    calls: [ { fn: PartialAlreadyDone }, { fn: SymbolInfoDouble }, { fn: PositionGetDouble }, { fn: MathAbs/MathFloor/MathMax }, { fn: tradeExit.PositionClosePartial }, { fn: MarkPartialDone } ]
+    returns: "void"
+
+  - name: MaybeTrail
+    signature: "void MaybeTrail(ulong ticket, bool isBuy, double &sl)"
+    description: "Trailing stop: ATR/CANDLE/STEP (na globalnych inputach)."
+    reads: [ { var: UseTrailing }, { var: ATR_Period }, { var: ATR_Multiplier }, { var: TrailStepEveryPoints }, { var: TrailStepLockPoints }, { var: _Symbol }, { var: candleHistory } ]
+    writes: []
+    calls: [ { fn: GetATR }, { fn: SymbolInfoDouble }, { fn: PositionGetDouble }, { fn: MathFloor }, { fn: tradeExit.PositionModify } ]
+    returns: "void"
+
+  - name: MaybeOppositeDIExit
+    signature: "bool MaybeOppositeDIExit(bool isBuy)"
+    description: "Warunek twardego wyjścia na bazie DI/ADX (globalne Exit* progi)."
+    reads: [ { var: UseOppositeDIExit }, { var: ExitAdxMin }, { var: ExitDiMin }, { var: ExitDiDiff } ]
+    writes: []
+    calls: [ { fn: GetCustomADXAt }, { fn: GetCustomPlusDIAt }, { fn: GetCustomMinusDIAt }, { fn: MathAbs } ]
+    returns: "bool"
+
+  - { name: MaybeTimeStop, signature: "bool MaybeTimeStop(datetime openTime)", description: "Time-stop wg MaxBarsInTrade (globalny).", reads: [ { var: UseTimeStop }, { var: MaxBarsInTrade } ], writes: [], calls: [ { fn: BarsSince } ], returns: "bool" }
+  - { name: MaybeSessionClose, signature: "bool MaybeSessionClose()", description: "Hook pod wyjście przy zmianie sesji (tu: zawsze false).", reads: [ { var: UseSessionCloseExit } ], writes: [], calls: [], returns: "bool" }
+
+  - name: ManageOpenPositions
+    signature: "void ManageOpenPositions(ulong magic)"
+    description: "Główna pętla: BE→Partial→Trail→(DI/time-stop) dla pozycji o danym magic."
+    reads: [ { var: UseExitManager }, { var: _Symbol }, { var: g_exitBindings } ]
+    writes: []
+    calls:
+      - { fn: PositionsTotal }
+      - { fn: PositionGetTicket }
+      - { fn: PositionSelectByTicket }
+      - { fn: PositionGetString/Integer/Double }
+      - { fn: EnsureBindingForPosition }
+      - { fn: FindBinding }
+      - { fn: CopyExitParams }
+      - { fn: MaybeMoveToBreakevenWithParams }
+      - { fn: MaybePartialTPWithParams }
+      - { fn: MaybeTrailWithParams }
+      - { fn: MaybeOppositeDIExitWithParams }
+      - { fn: BarsSince }
+      - { fn: tradeExit.PositionClose }
+
+  - { name: MaybeMoveToBreakevenWithParams, signature: "void MaybeMoveToBreakevenWithParams(ulong ticket, bool isBuy, double entry, double &sl, const ExitParams &p)", description: "BE na bazie ExitParams.", reads: [ { var: _Symbol } ], writes: [], calls: [ { fn: SymbolInfoDouble }, { fn: PositionGetDouble }, { fn: tradeExit.PositionModify }, { fn: MathAbs } ], returns: "void" }
+  - { name: MaybePartialTPWithParams, signature: "void MaybePartialTPWithParams(ulong ticket, bool isBuy, double entry, double sl, const ExitParams &p)", description: "Partial TP na bazie ExitParams.", reads: [ { var: _Symbol } ], writes: [], calls: [ { fn: SymbolInfoDouble }, { fn: PositionGetDouble }, { fn: MathAbs/MathFloor/MathMax }, { fn: tradeExit.PositionClosePartial } ], returns: "void" }
+  - { name: MaybeTrailWithParams, signature: "void MaybeTrailWithParams(ulong ticket, bool isBuy, double &sl, const ExitParams &p)", description: "Trailing SL wg ExitParams (ATR/CANDLE/STEP) – używa RD_ATR.", reads: [ { var: _Symbol }, { var: candleHistory } ], writes: [], calls: [ { fn: RD_ATR }, { fn: SymbolInfoDouble }, { fn: PositionGetDouble }, { fn: MathFloor }, { fn: tradeExit.PositionModify }, { fn: ArraySize } ], returns: "void" }
+  - { name: MaybeOppositeDIExitWithParams, signature: "bool MaybeOppositeDIExitWithParams(bool isBuy, const ExitParams &p)", description: "Twarde wyjście DI/ADX wg ExitParams.", reads: [], writes: [], calls: [ { fn: GetCustomADXAt }, { fn: GetCustomPlusDIAt }, { fn: GetCustomMinusDIAt }, { fn: MathAbs } ], returns: "bool" }
+
+# ===========================
+# StartTester/ExitOptimizer.mqh
+# ===========================
+file: StartTester/ExitOptimizer.mqh
+
+extern_or_input_refs:
+  - { name: candleHistory, type: "MqlRates[]", from: "StartTester/CandleAndTranactionData11.mqh", access: "read" }
+  - { name: _Symbol, type: "string (platform)", from: "MQL5", access: "read" }
+
+  # Wejścia i debug-flagi z tego pliku
+  - { name: ExitOpt_MinBarsFallback, type: "int (input)", from: "ExitOptimizer.mqh", access: "read" }
+  - { name: DebugExitOptimizer, type: "bool (input)", from: "ExitOptimizer.mqh", access: "read" }
+  - { name: DebugExitOptimizerGridVerbose, type: "bool (input)", from: "ExitOptimizer.mqh", access: "read" }
+  - { name: DebugExitSignals, type: "bool (input)", from: "ExitOptimizer.mqh", access: "read" }
+
+  # Zależności taktyk wejścia/SL/TP/symulacji
+  - { name: CalculateSLAndTP, type: "function", from: "StartTester/Position_Size11.mqh", access: "call" }
+  - { name: SimulatePendingAndTradePointsAdvanced, type: "function", from: "StartTester/PatternBacktest.mqh", access: "call" }
+
+  # Detektor reżimu i cechy
+  - { name: RegimeFeatures, type: "struct", from: "StartTester/RegimeDetector.mqh", access: "read" }
+  - { name: MarketRegime, type: "enum", from: "StartTester/RegimeDetector.mqh", access: "read" }
+  - { name: GetRegimeFeatures, type: "function", from: "StartTester/RegimeDetector.mqh", access: "call" }
+  - { name: ClassifyRegime, type: "function", from: "StartTester/RegimeDetector.mqh", access: "call" }
+
+  # Parametry wyjścia i trwałość
+  - { name: ExitParams, type: "struct", from: "StartTester/ExitPolicy.mqh", access: "read" }
+  - { name: CopyExitParams, type: "function", from: "StartTester/ExitPolicy.mqh", access: "call" }
+  - { name: SaveBestExitForRegime, type: "function", from: "StartTester/ExitPolicy.mqh", access: "call" }
+  - { name: g_best[4], type: "ExitParams[] (global)", from: "StartTester/ExitPolicy.mqh", access: "read/write" }
+  - { name: g_hasBest[4], type: "bool[] (global)", from: "StartTester/ExitPolicy.mqh", access: "read/write" }
+
+  # Wejściowe parametry zleceń/wyliczeń SL/TP (używane podczas symulacji)
+  - { name: inputExecuteMarginPoints, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputUseSLMethod, type: "int (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputSLMultiplier, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputSLPoints, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+  - { name: inputTPMultiplier, type: "double (input/extern)", from: "StartTester/Zmienne11.mqh", access: "read" }
+
+  # Platforma
+  - { name: PLATFORM_FUNCS, type: "MQL5 built-ins", list:
+      [ "ArraySize", "ArrayResize", "MathMin", "MathMax", "MathAbs", "MathFloor",
+        "TimeToString", "Print", "PrintFormat", "FileOpen", "FileWrite", "FileReadNumber",
+        "FileIsEnding", "FileClose", "SymbolInfoDouble" ] }
+
+globals:
+  - { name: (none), type: "-", init: "-", role: "-" }
+
+functions:
+  - name: EffectiveScanBars
+    signature: "int EffectiveScanBars(int requested)"
+    description: "Wyznacza bezpieczne okno skanowania (min z żądania i danych, >= ExitOpt_MinBarsFallback)."
+    reads:
+      - { var: candleHistory, how: "ArraySize()" }
+      - { var: ExitOpt_MinBarsFallback, how: "dolna granica" }
+    writes: []
+    calls:
+      - { fn: ArraySize }
+      - { fn: MathMin }
+      - { fn: MathMax }
+    returns: "int"
+
+  - name: EvaluatePerformanceAdvanced
+    signature: "double EvaluatePerformanceAdvanced(const double &profits[], double &profitFactor, double &maxDrawdown, double &winrate)"
+    description: "Liczy PF, DD, winrate oraz kompozytowy score; ogranicza wpływ outlierów."
+    reads: []
+    writes:
+      - { var: profitFactor, how: "set" }
+      - { var: maxDrawdown, how: "set" }
+      - { var: winrate, how: "set" }
+    calls:
+      - { fn: ArraySize }
+      - { fn: MathMin }
+    returns: "double (score)"
+
+  - name: OptimizeExitParametersForRegime
+    signature: "bool OptimizeExitParametersForRegime(MarketRegime targetRegime, int minBarsToScan, ExitParams &bestParamsOut, double &bestScoreOut)"
+    description: "Grid-search parametrów BE/Trailing/Partial/Time/DI dla danego reżimu; wybiera i zapisuje best."
+    reads:
+      - { var: candleHistory, how: "dostęp do danych OHLC" }
+      - { var: DebugExitSignals, how: "logowanie" }
+      - { var: DebugExitOptimizer, how: "logowanie" }
+      - { var: DebugExitOptimizerGridVerbose, how: "logowanie" }
+      - { var: inputExecuteMarginPoints/inputUseSLMethod/inputSLMultiplier/inputSLPoints/inputTPMultiplier, how: "parametry SL/TP i wejścia" }
+      - { var: _Symbol, how: "SymbolInfoDouble" }
+    writes:
+      - { var: bestParamsOut, how: "ustawienie najlepszych parametrów" }
+      - { var: bestScoreOut, how: "ustawienie najlepszego wyniku" }
+    calls:
+      - { fn: EffectiveScanBars }
+      - { fn: CheckImpulseConditions }
+      - { fn: GetRegimeFeatures }
+      - { fn: ClassifyRegime }
+      - { fn: SymbolInfoDouble }
+      - { fn: CalculateSLAndTP }
+      - { fn: SimulatePendingAndTradePointsAdvanced }
+      - { fn: EvaluatePerformanceAdvanced }
+      - { fn: CopyExitParams }
+      - { fn: SaveBestExitForRegime }
+      - { fn: Print/PrintFormat/TimeToString }
+    returns: "bool"
+
+  - name: BuildNeighborhoodDouble
+    signature: "void BuildNeighborhoodDouble(double center, double step, double low, double high, double &out[])"
+    description: "Sąsiedztwo 5-punktowe wokół center z klamrowaniem, bez duplikatów."
+    reads: []
+    writes:
+      - { var: out[], how: "ArrayResize + wartości" }
+    calls:
+      - { fn: ArrayResize }
+      - { fn: MathAbs }
+    returns: "void"
+
+  - name: BuildNeighborhoodInt
+    signature: "void BuildNeighborhoodInt(int center, int step, int low, int high, int &out[])"
+    description: "Sąsiedztwo int jak wyżej."
+    reads: []
+    writes:
+      - { var: out[], how: "ArrayResize + wartości" }
+    calls:
+      - { fn: ArrayResize }
+    returns: "void"
+
+  - name: EnsureIntArrayHasOne
+    signature: "void EnsureIntArrayHasOne(int &arr[], int v)"
+    description: "Jeśli tablica int pusta, wstaw v."
+    reads: []
+    writes:
+      - { var: arr[], how: "ArrayResize + arr[0]=v" }
+    calls:
+      - { fn: ArraySize }
+      - { fn: ArrayResize }
+    returns: "void"
+
+  - name: EnsureDblArrayHasOne
+    signature: "void EnsureDblArrayHasOne(double &arr[], double v)"
+    description: "Jeśli tablica double pusta, wstaw v."
+    reads: []
+    writes:
+      - { var: arr[], how: "ArrayResize + arr[0]=v" }
+    calls:
+      - { fn: ArraySize }
+      - { fn: ArrayResize }
+    returns: "void"
+
+  - name: RefineExitParametersForRegime
+    signature: "bool RefineExitParametersForRegime(MarketRegime regime, int minBarsToScan, const ExitParams &seedParams, ExitParams &bestParamsOut, double &bestScoreOut)"
+    description: "Fine-tuning wokół seedParams; skanuje wąskie sąsiedztwa tylko dla aktywnych elementów."
+    reads:
+      - { var: candleHistory }
+      - { var: _Symbol }
+      - { var: inputExecuteMarginPoints/inputUseSLMethod/inputSLMultiplier/inputSLPoints/inputTPMultiplier }
+    writes:
+      - { var: bestParamsOut }
+      - { var: bestScoreOut }
+    calls:
+      - { fn: EffectiveScanBars }
+      - { fn: CheckImpulseConditions }
+      - { fn: GetRegimeFeatures }
+      - { fn: ClassifyRegime }
+      - { fn: SymbolInfoDouble }
+      - { fn: CalculateSLAndTP }
+      - { fn: SimulatePendingAndTradePointsAdvanced }
+      - { fn: EvaluatePerformanceAdvanced }
+      - { fn: BuildNeighborhoodDouble/BuildNeighborhoodInt }
+      - { fn: EnsureIntArrayHasOne/EnsureDblArrayHasOne }
+      - { fn: CopyExitParams }
+      - { fn: SaveBestExitForRegime }
+      - { fn: PrintFormat }
+    returns: "bool"
+
+  - name: OptimizeExitParametersAllRegimes_CoarseFine
+    signature: "void OptimizeExitParametersAllRegimes_CoarseFine(int minBarsToScan = 300, bool saveToFile = true)"
+    description: "Dla 4 reżimów: coarse (grid) i opcjonalnie fine; na końcu zapis do pliku."
+    reads:
+      - { var: candleHistory }
+      - { var: DebugExitOptimizer }
+    writes: []
+    calls:
+      - { fn: EffectiveScanBars }
+      - { fn: OptimizeExitParametersForRegime }
+      - { fn: RefineExitParametersForRegime (opcjonalny, zakomentowany) }
+      - { fn: SaveBestExitParamsToFile }
+      - { fn: PrintFormat }
+    returns: "void"
+
+  - name: OptimizeExitParameters
+    signature: "void OptimizeExitParameters(int minBarsToScan = 300)"
+    description: "Alias – coarse/fine z zapisem do pliku."
+    reads: []
+    writes: []
+    calls:
+      - { fn: OptimizeExitParametersAllRegimes_CoarseFine }
+    returns: "void"
+
+  - name: SaveBestExitParamsToFile
+    signature: "bool SaveBestExitParamsToFile(string fname = 'best_exit_params.csv')"
+    description: "Zapisuje najlepsze parametry per reżim do COMMON/Files CSV."
+    reads:
+      - { var: g_hasBest[], how: "filtr reżimów" }
+      - { var: g_best[], how: "wartości do zapisu" }
+    writes: []
+    calls:
+      - { fn: FileOpen/FileWrite/FileClose }
+      - { fn: CopyExitParams }
+      - { fn: Print }
+    returns: "bool"
+
+  - name: LoadBestExitParamsFromFile
+    signature: "bool LoadBestExitParamsFromFile(string fname = 'best_exit_params.csv')"
+    description: "Wczytuje najlepsze parametry per reżim z COMMON/Files CSV."
+    reads: []
+    writes:
+      - { var: g_best[], how: "set" }
+      - { var: g_hasBest[], how: "set true" }
+    calls:
+      - { fn: FileOpen/FileReadNumber/FileIsEnding/FileClose }
+      - { fn: Print }
+    returns: "bool"
+
+  - name: OptimizeExitParametersAllRegimes
+    signature: "void OptimizeExitParametersAllRegimes(int minBarsToScan = 300)"
+    description: "Odpala optymalizację reżimów po kolei (bez pipelinu coarse/fine)."
+    reads: []
+    writes: []
+    calls:
+      - { fn: OptimizeExitParametersForRegime }
+    returns: "void"
+
+# ===========================
+# StartTester/ExitPolicy.mqh
+# ===========================
+file: StartTester/ExitPolicy.mqh
+
+extern_or_input_refs:
+  - { name: TrailMethod, type: "enum", from: "StartTester/ExitTypes.mqh", access: "read" }
+  - { name: MarketRegime, type: "enum", from: "StartTester/RegimeDetector.mqh", access: "read" }
+  - { name: REG_TREND_STRONG/REG_TREND_WEAK/REG_CHOP/REG_VOL_SPIKE, type: "enum values", from: "StartTester/RegimeDetector.mqh", access: "read" }
+  - { name: _Symbol, type: "string (platform)", from: "MQL5", access: "read" }
+  - { name: SymbolInfoDouble, type: "func (MQL5)", from: "MQL5", access: "call" }
+  - { name: SYMBOL_VOLUME_MIN/SYMBOL_VOLUME_STEP, type: "constants (MQL5)", from: "MQL5", access: "read" }
+
+globals:
+  - { name: g_hasBest, type: "bool[4]", init: "{false,false,false,false}", role: "flaga dostępności najlepszych parametrów per reżim (RAM)" }
+  - { name: g_best, type: "ExitParams[4]", init: "zero-init", role: "najlepsze znane parametry wyjścia per reżim (RAM)" }
+
+types:
+  - name: ExitParams
+    kind: struct
+    fields:
+      [
+        useBE: bool, beR: double, beOffsetPts: int,
+        usePartial: bool, partialR: double, partialPct: double,
+        trail: TrailMethod, atrPeriod: int, atrMult: double,
+        stepEveryPts: int, stepLockPts: int,
+        useTimeStop: bool, maxBars: int,
+        useDIExit: bool, adxMin: int, diMin: int, diDiff: int
+      ]
+
+functions:
+  - name: CopyExitParams
+    signature: "void CopyExitParams(ExitParams &dst, const ExitParams &src)"
+    description: "Kopiuje 1:1 pola ExitParams ze src do dst."
+    reads: []
+    writes: [ { var: dst, how: "kopiowane pola" } ]
+    calls: []
+    returns: "void"
+
+  - name: CanPartialByLot
+    signature: "bool CanPartialByLot()"
+    description: "Sprawdza, czy częściowe zamknięcia są ogólnie możliwe (na bazie min wolumenu/kroku)."
+    reads:
+      - { var: _Symbol, how: "symbol dla SymbolInfoDouble" }
+    writes: []
+    calls:
+      - { fn: SymbolInfoDouble, why: "odczyt SYMBOL_VOLUME_MIN i SYMBOL_VOLUME_STEP" }
+    returns: "bool"
+
+  - name: DefaultExitForRegime (returning)
+    signature: "ExitParams DefaultExitForRegime(MarketRegime r, bool allowPartial)"
+    description: "Zwraca domyślne parametry wyjścia zależne od reżimu; uwzględnia allowPartial."
+    reads: []
+    writes: []
+    calls: []
+    returns: "ExitParams"
+
+  - name: LoadBestExitForRegime (returning)
+    signature: "ExitParams LoadBestExitForRegime(MarketRegime r)"
+    description: "Zwraca best z RAM dla reżimu; jeśli brak, zwraca domyślne (allowPartial=true)."
+    reads:
+      - { var: g_hasBest[], how: "sprawdzenie dostępności" }
+      - { var: g_best[], how: "odczyt best" }
+    writes: []
+    calls:
+      - { fn: DefaultExitForRegime, why: "fallback na domyślne" }
+    returns: "ExitParams"
+
+  - name: SaveBestExitForRegime
+    signature: "void SaveBestExitForRegime(MarketRegime r, const ExitParams &p)"
+    description: "Zapis do RAM najlepszych parametrów dla reżimu; zaznacza g_hasBest[r]=true."
+    reads: []
+    writes:
+      - { var: g_best[], how: "set" }
+      - { var: g_hasBest[], how: "set=true" }
+    calls: []
+    returns: "void"
+
+  - name: DefaultExitForRegime (by-ref)
+    signature: "void DefaultExitForRegime(MarketRegime r, bool allowPartial, ExitParams &out)"
+    description: "Wypełnia out domyślnymi parametrami zależnymi od reżimu; allowPartial steruje partial."
+    reads: []
+    writes:
+      - { var: out, how: "ustawia wszystkie pola" }
+    calls: []
+    returns: "void"
+
+  - name: LoadBestExitForRegime (by-ref)
+    signature: "bool LoadBestExitForRegime(MarketRegime r, ExitParams &out)"
+    description: "Jeśli istnieje best w RAM — kopiuje do out (true); w przeciwnym razie domyślne (false)."
+    reads:
+      - { var: g_hasBest[], how: "sprawdzenie dostępności" }
+      - { var: g_best[], how: "odczyt best" }
+    writes:
+      - { var: out, how: "CopyExitParams lub DefaultExitForRegime" }
+    calls:
+      - { fn: CopyExitParams }
+      - { fn: DefaultExitForRegime }
+    returns: "bool"
+
+cross_module_links:
+  uses:
+    - { from: "ExitPolicy.mqh", to: "ExitTypes.mqh", what: "TrailMethod enum" }
+    - { from: "ExitPolicy.mqh", to: "RegimeDetector.mqh", what: "MarketRegime enum i wartości REG_*" }
+  provides:
+    - { name: ExitParams, kind: "struct", for: ["ExitManager.mqh", "ExitOptimizer.mqh", "inne moduły wyjść"] }
+    - { name: CopyExitParams, kind: "function", for: ["ExitManager.mqh", "ExitOptimizer.mqh"] }
+    - { name: SaveBestExitForRegime / LoadBestExitForRegime, kind: "functions", for: ["ExitOptimizer.mqh", "ExitEngine/ExitManager"] }
+    - { name: DefaultExitForRegime, kind: "function", for: ["Fallback parametrów gdy brak wyników optymalizacji"] }
+
+# ===========================
+# StartTester/ExitTypes.mqh
+# ===========================
+file: StartTester/ExitTypes.mqh
+
+extern_or_input_refs: []
+
+globals: []
+
+types:
+  - name: TrailMethod
+    kind: enum
+    values:
+      - { name: TRAIL_NONE, value: 0, role: "brak trailing stopu" }
+      - { name: TRAIL_ATR,  value: 1, role: "trailing po ATR (k*ATR od ceny odniesienia)" }
+      - { name: TRAIL_STEP, value: 2, role: "schodkowe dociąganie SL co określoną liczbę punktów" }
+      - { name: TRAIL_CANDLE, value: 3, role: "SL ustawiany za świecą (np. low/high poprzedniej świecy ± bufor)" }
+
+functions: []
+
+cross_module_links:
+  provides:
+    - { name: TrailMethod, kind: "enum", for: ["ExitPolicy.mqh", "ExitManager.mqh", "ExitOptimizer.mqh", "PatternBacktest.mqh"] }
+  used_by:
+    - { file: "StartTester/ExitPolicy.mqh", what: "pola ExitParams.trail; dobór domyślnej metody trailing" }
+    - { file: "StartTester/ExitManager.mqh", what: "logika MaybeTrail*/MaybeTrailWithParams — przełączanie sposobu modyfikacji SL" }
+    - { file: "StartTester/ExitOptimizer.mqh", what: "grid i refine parametrów — pętla po metodach trailing" }
+
+notes:
+  - "Plik nie definiuje funkcji ani zmiennych globalnych — wyłącznie enum."
+  - "Zmiana wartości liczbowych enum wymaga spójnych modyfikacji w modułach korzystających."
+
+# ===========================
+# StartTester/PatternBacktest.mqh
+# ===========================
+file: StartTester/PatternBacktest.mqh
+
+extern_or_input_refs:
+  - { name: candleHistory, type: "MqlRates[]", from: "StartTester/CandleAndTranactionData11.mqh", access: "read" }
+  - { name: DebugPatternBacktest, type: "bool (input/extern)", from: "StartTester/PatternOptymalizer11.mqh" }
+  - { name: inputSimSpreadPoints, type: "int/double (input/extern)", from: "StartTester/PatternOptymalizer11.mqh lub Zmienne11.mqh" }
+  - { name: inputSimSlippagePoints, type: "int/double (input/extern)", from: "StartTester/PatternOptymalizer11.mqh lub Zmienne11.mqh" }
+  - { name: Exit_ATR_Period, type: "int (const/input)", from: "ExitEngine.mqh lub Zmienne11.mqh", access: "read" }
+  - { name: Exit_Swing_N_Default, type: "int (const/input)", from: "ExitEngine.mqh lub Zmienne11.mqh", access: "read" }
+  - { name: Exit_Swing_OffsetPts, type: "int (const/input)", from: "ExitEngine.mqh lub Zmienne11.mqh", access: "read" }
+  - { name: GetCustomADXAt, type: "function", from: "StartTester/CandleAndTranactionData11.mqh", access: "call" }
+  - { name: GetCustomPlusDIAt, type: "function", from: "StartTester/CandleAndTranactionData11.mqh", access: "call" }
+  - { name: GetCustomMinusDIAt, type: "function", from: "StartTester/CandleAndTranactionData11.mqh", access: "call" }
+  - { name: _Symbol/_Point, type: "platform", from: "MQL5", access: "read" }
+  - { name: SymbolInfoDouble, type: "platform function", from: "MQL5", access: "call" }
+
+types:
+  - { name: TrailMethod, kind: "enum", from: "StartTester/ExitTypes.mqh" }
+  - { name: ExitPolicy, kind: "enum", from: "ExitEngine.mqh" }
+  - { name: ExitParamsATR, kind: "struct", from: "ExitEngine.mqh" }
+  - { name: ExitParamsSW, kind: "struct", from: "ExitEngine.mqh" }
+  - { name: ExitParamsHYB, kind: "struct", from: "ExitEngine.mqh" }
+
+globals: []
+
+functions:
+  - name: CrossedUp
+    signature: "bool CrossedUp(double price, int i)"
+    description: "Czy high świecy[i] ≥ price."
+    reads: [ candleHistory[i].high ]
+    writes: []
+    calls: []
+
+  - name: CrossedDown
+    signature: "bool CrossedDown(double price, int i)"
+    description: "Czy low świecy[i] ≤ price."
+    reads: [ candleHistory[i].low ]
+    writes: []
+    calls: []
+
+  - name: SimulatePendingAndTradePoints
+    signature: "bool SimulatePendingAndTradePoints(int signalIndex, bool isBuy, double pendingPrice, double sl, double tp, double &points, int expiryBars)"
+    description: "Prosta symulacja aktywacji pendinga i realizacji SL/TP (konserwatywnie: SL przed TP)."
+    reads:
+      - [ candleHistory[].high, candleHistory[].low ]
+      - [ _Point, inputSimSpreadPoints, inputSimSlippagePoints, DebugPatternBacktest ]
+    writes:
+      - [ points ]
+    calls:
+      - [ PrintFormat, MathMax ]
+
+  - name: __TrimmedMean
+    signature: "double __TrimmedMean(const double &a[], double alpha)"
+    description: "Obcięta średnia (usuwa alfa z dołu i góry)."
+    reads: []
+    writes: []
+    calls: [ ArraySize, ArrayResize, ArraySort, MathFloor ]
+
+  - name: __MaxLosingStreak
+    signature: "int __MaxLosingStreak(const double &a[])"
+    description: "Długość najdłuższej serii strat w wynikach."
+    reads: []
+    writes: []
+    calls: [ ArraySize ]
+
+  - name: EvaluatePerformance
+    signature: "double EvaluatePerformance(const double &profits[])"
+    description: "Score stabilizowany: tmean*n + avgProfit*winrate*2 - avgLoss*(1-winrate) - 0.35*maxLS*avgLoss."
+    reads: []
+    writes: []
+    calls: [ __TrimmedMean, __MaxLosingStreak, ArraySize, PrintFormat ]
+
+  - name: SimulatePendingAndTradePointsAdvanced
+    signature: "bool SimulatePendingAndTradePointsAdvanced(int signalIndex, bool isBuy, double pendingPrice, double entrySL, double entryTP, double &pointsOut, int expiryBars, bool useBE, double beR, int beOffsetPts, TrailMethod tMethod, int atrPeriod, double atrMult, int stepEveryPts, int stepLockPts, bool usePartial, double partialR, double partialPct, bool useTimeStop, int maxBars, bool useOppositeDI, int exitAdxMin, int exitDiMin, int exitDiDiff)"
+    description: "Zaawansowana symulacja pending + BE + trailing (ATR/STEP/CANDLE) + partial + time-stop + DI-exit. Uwaga: trailing ATR używa parametru funkcji 'atrPeriod' (nie korzysta tu z globalnego Exit_ATR_Period); w sekcji SL/TP warunek TP odnosi się do zmiennej 'tp'."
+    reads:
+      - [ candleHistory[].high, candleHistory[].low, candleHistory[0].close ]
+      - [ _Symbol, _Point, SymbolInfoDouble ]
+      - [ GetCustomADXAt, GetCustomPlusDIAt, GetCustomMinusDIAt ]
+    writes:
+      - [ pointsOut ]
+    calls:
+      - [ Math*, ArraySize, SymbolInfoDouble ]
+
+  - name: __Pts
+    signature: "double __Pts(double pts)"
+    description: "Konwersja punktów na cenę (pts * _Point)."
+    reads: [ _Point ]
+    writes: []
+    calls: []
+
+  - name: __ATR_Back
+    signature: "double __ATR_Back(int centerShift, int period)"
+    description: "Uśredniony True Range na oknie wstecz."
+    reads: [ candleHistory[].high, candleHistory[].low, candleHistory[].close ]
+    writes: []
+    calls: [ ArraySize, MathMax, MathAbs ]
+
+  - name: __HighestHigh_Back
+    signature: "double __HighestHigh_Back(int fromShift, int bars)"
+    description: "Najwyższe high w przedziale."
+    reads: [ candleHistory[].high ]
+    writes: []
+    calls: [ ArraySize, MathMax ]
+
+  - name: __LowestLow_Back
+    signature: "double __LowestLow_Back(int fromShift, int bars)"
+    description: "Najniższe low w przedziale."
+    reads: [ candleHistory[].low ]
+    writes: []
+    calls: [ ArraySize, MathMin ]
+
+  - name: __FindActivationShift
+    signature: "int __FindActivationShift(int i, bool isBuy, double entryPrice, int expiryBars)"
+    description: "Szukaj świecy aktywującej pending w oknie 'expiryBars' (dla BUY uwzględnia spread)."
+    reads: [ candleHistory[].high, candleHistory[].low, _Point, inputSimSpreadPoints ]
+    writes: []
+    calls: [ MathMax ]
+
+  - name: SimulateTradeWithExit
+    signature: "bool SimulateTradeWithExit(int i, bool isBuy, double entryPrice, double slInit, double tpInit, ExitPolicy pol, const ExitParamsATR &pATR, const ExitParamsSW &pSW, const ExitParamsHYB &pHYB, double &points, int expiryBars)"
+    description: "Pełny backtest pozycji z polityką wyjścia (ATR/SWING/HYBRID), BE, partial, time-stop."
+    reads:
+      - [ candleHistory[].high, candleHistory[].low, candleHistory[].close ]
+      - [ _Point, inputSimSlippagePoints, Exit_ATR_Period, Exit_Swing_N_Default, Exit_Swing_OffsetPts ]
+    writes:
+      - [ points ]
+    calls:
+      - [ __FindActivationShift, __Pts, __ATR_Back, __HighestHigh_Back, __LowestLow_Back, ArraySize, Math* ]
+
+cross_module_links:
+  provides:
+    - { fn: SimulatePendingAndTradePoints, used_by: ["PatternOptymalizer11.mqh", "ExitOptimizer.mqh"] }
+    - { fn: SimulatePendingAndTradePointsAdvanced, used_by: ["ExitOptimizer.mqh"] }
+    - { fn: EvaluatePerformance, used_by: ["PatternOptymalizer11.mqh (warianty)", "ExitOptimizer.mqh (czasem wersja Advanced)"] }
+  depends_on:
+    - { file: "StartTester/CandleAndTranactionData11.mqh", what: ["candleHistory", "GetCustomADXAt", "GetCustomPlusDIAt", "GetCustomMinusDIAt"] }
+    - { file: "StartTester/ExitTypes.mqh", what: ["TrailMethod"] }
+    - { file: "ExitEngine.mqh", what: ["ExitPolicy", "ExitParamsATR/SW/HYB", "Exit_* domyślne"] }
+    - { file: "PatternOptymalizer11.mqh / Zmienne11.mqh", what: ["inputSimSpreadPoints", "inputSimSlippagePoints", "DebugPatternBacktest"] }
+
+notes:
+  - "Kolejność w barze jest konserwatywna: SL przed TP."
+  - "W SimulatePendingAndTradePointsAdvanced trailing ATR opiera się na *parametrze funkcji* atrPeriod (nie na Exit_ATR_Period)."
+  - "Warunek TP w Advanced korzysta z bieżącego 'tp' (nie 'entryTP')."
+
+# ===========================
+# PatternDetector11.mqh
+# ===========================
+file: StartTester/PatternDetector11.mqh
+
+includes:
+  - { name: Zmienne11.mqh, role: "inputs/globals/thresholds" }
+  - { name: CandleAndTranactionData11.mqh, role: "candleHistory[], ADX/DI bufory, FindIndexByTime, ComputeCustomADX, GetCustom*DI/ADX" }
+  - { name: RangeAndVolumeAnalyzer11.mqh, role: "GetStandardizedRange/Volume, DetectRegimeKey, avg session stats, session utils" }
+  - { name: BuySellFunction11.mqh, role: "CalculateSLAndTP, ExecuteImpulseTrade (czasem też smart executor)" }
+  - { name: Position_Size11.mqh, role: "parametry SL/TP/pozycjonowanie (inputs/consts)" }
+  - { name: PatternBacktest.mqh, role: "SimulatePendingAndTradePoints (symulacja aktywacji/SL/TP)" }
+  - { name: SmartOrderExecutor11.mqh, role: "realizacja zleceń/egzekucja" }
+
+inputs_and_consts_defined_here:
+  - { name: PD_UniMA_LastBars, type: input int, default: 400 }
+  - { name: PD_UniMA_FastCol, type: input color, default: clrOrange }
+  - { name: PD_UniMA_SlowCol, type: input color, default: clrRed }
+  - { name: PD_UniMA_Width, type: input int, default: 2 }
+  - { name: DET_MA_METHOD, type: macro default, default: MODE_EMA }
+  - { name: PD_UNI_FAST/PD_UNI_SLOW, type: const string, role: "prefiksy obiektów graficznych MA" }
+  - { name: NUM_REGIMES, type: const int, default: 4 }
+  - { name: FIXED_MA_FAST[], type: const int[NUM_REGIMES], default: [20,20,20,20] }
+  - { name: FIXED_MA_SLOW[], type: const int[NUM_REGIMES], default: [50,50,50,50] }
+
+extern_or_input_refs_used:
+  # sesja / filtry czasu
+  - { name: UseSessionTimeFilter, scope: input/global, from: Zmienne11.mqh }
+  - { name: BlockFirstMinutesOfSession/BlockLastMinutesOfSession/BlockLastMinutesOfDay, scope: inputs, from: Zmienne11.mqh }
+  - { name: DebugTimeFilter/TimeFilterLogOncePerBar/TimeFilterLogOnlyLiveBar, scope: inputs, from: Zmienne11.mqh }
+  - { name: GetSession, scope: function, from: RangeAndVolumeAnalyzer11.mqh }
+
+  # detektor / progi
+  - { name: IMP_ZR_MIN_PD/IMP_ZV_MIN_PD, scope: thresholds, from: Zmienne11.mqh/RegimeThresholds.mqh }
+  - { name: DET_ZR_Mult_PD/DET_ZV_Mult_PD, scope: multipliers, from: Zmienne11.mqh/RegimeThresholds.mqh }
+  - { name: DET_ZR_Mults_PD/DET_ZV_Mults_PD/DET_ADX_Mults_PD/DET_DI_Mults_PD, scope: per-regime csv-like, from: Zmienne11.mqh/RegimeThresholds.mqh }
+  - { name: impulseAdxThreshold/impulseMinDiffDI, scope: thresholds, from: PatternOptymalizer11.mqh/Zmienne11.mqh }
+  - { name: DET_MA_Soft/DET_MA_Soft_Tolerance, scope: inputs, from: Zmienne11.mqh }
+
+  # trade exec / SLTP / pending
+  - { name: inputExecuteMarginPoints/inputUseSLMethod/inputMagicNumber, scope: inputs, from: Zmienne11.mqh }
+  - { name: inputSLMultiplier/inputSLPoints/inputTPMultiplier, scope: inputs, from: Zmienne11.mqh }
+  - { name: inputPendingExpiryBars, scope: input, from: Zmienne11.mqh }
+  - { name: inputOneSignalPerBarPerDirection, scope: input, from: Zmienne11.mqh }
+
+  # tryby testowe i diagnostyka
+  - { name: Test_Mode, scope: input/enum, from: Zmienne11.mqh }
+  - { name: DebugSessionAnalyzer, scope: input, from: Zmienne11.mqh }
+  - { name: Enable_Detector_Live, scope: input, from: Zmienne11.mqh }
+  - { name: DebugRegime/DebugRegime_OnceBar, scope: inputs, from: Zmienne11.mqh }
+
+globals_defined_here:
+  - { name: __REG_lastLogBar, type: static datetime, role: "anty-dublet logu w Regime_LogBar" }
+
+globals_used_from_elsewhere:
+  - { name: candleHistory[], type: MqlRates[], from: CandleAndTranactionData11.mqh }
+  - { name: impulseCandlesSinceLastDetection, type: int, from: PatternOptymalizer11.mqh }
+
+functions_defined_here:
+  - name: __GetMultFromCsv
+    does: "czyta mnożnik z CSV"
+    calls: [ StringSplit, StringTrimLeft, StringTrimRight, StringToDouble ]
+    uses_globals: []
+
+  - name: __GetSessionBounds
+    does: "mapuje czas na (startHour,endHour) dla danej sesji"
+    calls: [ GetSession ]
+    uses_globals: []
+
+  - name: PassesSessionTimeFilter
+    does: "filtr czasu sesji dla baru i; z logowaniem"
+    calls: [ __GetSessionBounds, TimeToStruct, PrintFormat ]
+    uses_globals: [ UseSessionTimeFilter, BlockFirstMinutesOfSession, BlockLastMinutesOfSession, BlockLastMinutesOfDay, DebugTimeFilter, TimeFilterLogOncePerBar, TimeFilterLogOnlyLiveBar, candleHistory ]
+
+  - name: __PD_HasWindow / __PD_SMA_Close / __PD_EMA_Close / __PD_SMMA_Close / __PD_LWMA_Close
+    does: "okna i warianty MA obliczane ręcznie na candleHistory"
+    calls: [ __PD_HasWindow, __PD_SMA_Close (dla EMA/SMMA) ]
+    uses_globals: [ candleHistory ]
+
+  - name: __MA_Close_PeriodAtShift
+    does: "uniwersalny accessor MA(close) wg metody"
+    calls: [ __PD_SMA_Close, __PD_EMA_Close, __PD_SMMA_Close, __PD_LWMA_Close ]
+    uses_globals: [ DET_MA_METHOD ]
+
+  - name: PassesMaCloseFilter_PerRegime
+    does: "filtr MA (położenie ceny vs MA fast/slow) per regime"
+    calls: [ DetectRegimeKey, __MA_Close_PeriodAtShift ]
+    uses_globals: [ candleHistory, FIXED_MA_FAST, FIXED_MA_SLOW, DET_MA_Soft, DET_MA_Soft_Tolerance, NUM_REGIMES ]
+
+  - name: Regime_LogBar
+    does: "loguje regim, |Zr| i |Zv| dla i"
+    calls: [ DetectRegimeKey, GetStandardizedRange, GetStandardizedVolume, TimeToString, PrintFormat ]
+    uses_globals: [ DebugRegime, DebugRegime_OnceBar, __REG_lastLogBar, candleHistory ]
+
+  - name: Regime_Summary
+    does: "zbiorcze statystyki reżimów na oknie"
+    calls: [ DetectRegimeKey, GetStandardizedRange, GetStandardizedVolume, PrintFormat, ArrayInitialize ]
+    uses_globals: [ candleHistory, NUM_REGIMES ]
+
+  - name: __GetActiveMAPeriods
+    does: "pobiera (fastP,slowP) per regime z FIXED_*"
+    calls: []
+    uses_globals: [ FIXED_MA_FAST, FIXED_MA_SLOW, NUM_REGIMES ]
+
+  - name: __ComputeMASideTwoClose
+    does: "histereza: 2 zamknięcia po tej samej stronie obu MA"
+    calls: [ __MA_Close_PeriodAtShift ]
+    uses_globals: [ candleHistory ]
+
+  - name: __PD_DeleteAllSegmentsForPrefix
+    does: "usuwa narysowane segmenty MA o prefiksie"
+    calls: [ ObjectsTotal, ObjectName, StringFind, ObjectDelete ]
+    uses_globals: [ _Symbol, _Period ]
+
+  - name: PD_DrawUnifiedRegimeMA
+    does: "rysuje 2×MA w segmentach"
+    calls: [ ObjectFind, ObjectDelete, __PD_DeleteAllSegmentsForPrefix, DetectRegimeKey, __GetActiveMAPeriods, __MA_Close_PeriodAtShift, ObjectCreate, ObjectSetInteger ]
+    uses_globals: [ candleHistory, PD_UniMA_LastBars, PD_UniMA_FastCol, PD_UniMA_SlowCol, PD_UniMA_Width, PD_UNI_FAST, PD_UNI_SLOW, _Symbol, _Period ]
+
+  - name: CheckImpulseConditions
+    does: "pełna walidacja impulsu (Zr/Zv, ADX/DI, czas, MA-histereza)"
+    calls: [ GetCurrentSessionAverageRange, GetCurrentSessionAverageVolume, PassesSessionTimeFilter, DetectRegimeKey, GetStandardizedRange, GetStandardizedVolume, __GetMultFromCsv, GetCustomADXAt, ComputeCustomADX, GetCustomPlusDIAt, GetCustomMinusDIAt, __GetActiveMAPeriods, __ComputeMASideTwoClose ]
+    uses_globals: [ candleHistory, IMP_ZR_MIN_PD, IMP_ZV_MIN_PD, DET_ZR_Mult_PD, DET_ZV_Mult_PD, DET_ZR_Mults_PD, DET_ZV_Mults_PD, DET_ADX_Mults_PD, DET_DI_Mults_PD, impulseAdxThreshold, impulseMinDiffDI, NUM_REGIMES ]
+
+  - name: DrawTradeArrowByIndex / DrawTradeArrow / DrawArrow / DrawSignalArrow
+    does: "rysowanie strzałek sygnałowych"
+    calls: [ ObjectFind, ObjectCreate, ObjectSetInteger, TimeToString, FindIndexByTime ]
+    uses_globals: [ candleHistory, _Point ]
+
+  - name: DetectLivePatternAndDraw
+    does: "detektor LIVE + ExecuteImpulseTrade po weryfikacji"
+    calls: [ PD_DrawUnifiedRegimeMA, DetectRegimeKey, CheckImpulseConditions, __GetActiveMAPeriods, __ComputeMASideTwoClose, DrawTradeArrow, SymbolInfoInteger, SymbolInfoDouble, ExecuteImpulseTrade ]
+    uses_globals: [ candleHistory, inputOneSignalPerBarPerDirection, inputExecuteMarginPoints, inputUseSLMethod, inputMagicNumber, _Point, _Symbol, impulseCandlesSinceLastDetection ]
+
+  - name: DetectHistoricalImpulsesWithProfitCheck
+    does: "skan historii, szybka symulacja pending+SL/TP, rysowanie tylko zyskownych"
+    calls: [ CheckImpulseConditions, SymbolInfoDouble, CalculateSLAndTP, SimulatePendingAndTradePoints, DrawTradeArrow, PD_DrawUnifiedRegimeMA ]
+    uses_globals: [ candleHistory, inputExecuteMarginPoints, inputUseSLMethod, inputSLMultiplier, inputSLPoints, inputTPMultiplier, inputPendingExpiryBars, _Symbol ]
+
+  - name: TestHarness_OnClosedBar
+    does: "test harness po zamkniętej świecy"
+    calls: [ PD_DrawUnifiedRegimeMA, SessionAnalyzer_DumpSnapshot, Regime_LogBar, DetectLivePatternAndDraw ]
+    uses_globals: [ Test_Mode, DebugSessionAnalyzer, Enable_Detector_Live ]
+
+  - name: Detector_StageAuditEx / Detector_StageAudit / Detector_StageAudit_PerRegime
+    does: "audyt etapów detektora (zbiorczo/per-regime)"
+    calls: [ PassesSessionTimeFilter, GetStandardizedRange, GetStandardizedVolume, __GetMultFromCsv, GetCustomADXAt, ComputeCustomADX, GetCustomPlusDIAt, GetCustomMinusDIAt, PassesMaCloseFilter_PerRegime, CheckImpulseConditions, PrintFormat ]
+    uses_globals: [ candleHistory, NUM_REGIMES, IMP_ZR_MIN_PD, IMP_ZV_MIN_PD, DET_ZR_Mult_PD, DET_ZV_Mult_PD, DET_ZR_Mults_PD, DET_ZV_Mults_PD, DET_ADX_Mults_PD, DET_DI_Mults_PD, impulseAdxThreshold, impulseMinDiffDI ]
+
+notes:
+  - "MA liczone ręcznie (bez iMA), domyślnie EMA; okresy są stałe per-regime."
+  - "Detekcja LIVE pilnuje jednego sygnału na bar i kierunek (inputOneSignalPerBarPerDirection)."
+  - "Audyt liczy przejścia przez: czas sesji → Zr/Zv → ADX/DI → MA → PASS."
+
+# ===========================
+# PatternOptymalizer11.mqh
+# ===========================
+file: StartTester/PatternOptymalizer11.mqh
+
+includes:
+  - { name: Zmienne11.mqh, role: "inputs/globalne/flag debug" }
+  - { name: CandleAndTranactionData11.mqh, role: "candleHistory[], ADX/DI bufory" }
+  - { name: RangeAndVolumeAnalyzer11.mqh, role: "Z-score (GetStandardizedRange/Volume), sesje, avgRange/avgVolume, GetSession, IsSessionDataReady, SessionTypeToString, AnalyzeInitialSessionRangesAndVolumes" }
+  - { name: Position_Size11.mqh, role: "parametry SL/TP, kalkulatory" }
+  - { name: ExitEngine.mqh, role: "typy ExitParams*, ExitPolicy, ExitEngine_SetBestForRegime, domyślne stałe Exit_*" }
+  - { name: PatternBacktest.mqh, role: "SimulatePendingAndTradePoints, SimulateTradeWithExit, EvaluatePerformance" }
+  - { name: PatternDetector11.mqh, role: "CheckImpulseConditions, DetectRegimeKey" }
+
+defines_and_consts:
+  - { name: NUM_REGIMES, where: "guarded here", default: 4 }
+
+globals_defined_here:
+  - { name: impulseRangeFactor, type: double, default: 1.6, role: "legacy próg range×avgRange dla impulsu" }
+  - { name: impulseVolumeFactor, type: double, default: 1.5, role: "legacy próg vol×avgVolume dla impulsu" }
+  - { name: accumulationRangeFactor, type: double, default: 0.8, role: "legacy próg range dla akumulacji (<=)" }
+  - { name: accumulationVolumeFactor, type: double, default: 0.7, role: "legacy próg wolumenu dla akumulacji (>=)" }
+  - { name: fakeBreakoutRangeMinFactor, type: double, default: 0.5, role: "legacy FB: dolny limit range×avgRange" }
+  - { name: fakeBreakoutRangeMaxFactor, type: double, default: 1.2, role: "legacy FB: górny limit range×avgRange" }
+  - { name: fakeBreakoutVolumeFactor, type: double, default: 1.0, role: "legacy FB: limit wolumenu×avgVolume (<=)" }
+  - { name: impulseAdxThreshold, type: int, default: 20, role: "legacy próg ADX dla impulsu" }
+  - { name: impulseMinDiffDI, type: int, default: 10, role: "legacy próg |+DI−−DI| dla impulsu" }
+  - { name: impulseLiveCandleCounter, type: int, default: 0, role: "licznik barów między optymalizacjami" }
+  - { name: maxTestCandles, type: int, default: 300, role: "limit świec w optymalizacjach legacy i exit" }
+  - { name: CAND_ATR_K[], type: double[], default: [2.2,2.6,3.0,3.6], role: "kandydaci ATR-k" }
+  - { name: CAND_SWING_N[], type: int[], default: [5,8,13], role: "kandydaci SWING N" }
+  - { name: CAND_SWING_OFF[], type: int[], default: [5,8,13], role: "kandydaci SWING offset pts" }
+  - { name: CAND_HYB_BE_R[], type: double[], default: [0.8,1.0,1.2], role: "kandydaci HYB: BE po R" }
+  - { name: CAND_HYB_TRAIL_K[], type: double[], default: [2.6,3.2,3.8], role: "kandydaci HYB: ATR trail k" }
+  - { name: lastGoodImpulseRangeFactor, type: double, default: 1.6, role: "fallback gdy brak impulsów" }
+  - { name: lastGoodImpulseVolumeFactor, type: double, default: 1.5, role: "fallback gdy brak impulsów" }
+  - { name: lastGoodImpulseAdxThreshold, type: int, default: 20, role: "fallback" }
+  - { name: lastGoodImpulseMinDiffDI, type: int, default: 10, role: "fallback" }
+  - { name: impulseCandlesSinceLastDetection, type: int, default: 0, role: "licznik świec od ostatniego impulsu (współdzielony z detektorem LIVE)" }
+  - { name: lastOptimizedSession, type: SessionType, default: SESSION_UNKNOWN, role: "ostatnio zopt. sesja do triggera auto-opt" }
+
+extern_or_input_refs_used:
+  - { name: candleHistory[], from: CandleAndTranactionData11.mqh }
+  - { name: GetStandardizedRange/Volume, from: RangeAndVolumeAnalyzer11.mqh }
+  - { name: GetSession/IsSessionDataReady/SessionTypeToString, from: RangeAndVolumeAnalyzer11.mqh }
+  - { name: AnalyzeInitialSessionRangesAndVolumes, from: RangeAndVolumeAnalyzer11.mqh }
+  - { name: GetCurrentSessionAverageRange/Volume, from: RangeAndVolumeAnalyzer11.mqh }
+  - { name: ComputeCustomADX/GetCustomADXAt/GetCustomPlusDIAt/GetCustomMinusDIAt, from: CandleAndTranactionData11.mqh }
+  - { name: DetectRegimeKey, from: PatternDetector11.mqh/RangeAndVolumeAnalyzer11.mqh }
+  - { name: CheckImpulseConditions, from: PatternDetector11.mqh }
+  - { name: CalculateSLAndTP, from: Position_Size11.mqh }
+  - { name: SimulatePendingAndTradePoints/SimulateTradeWithExit/EvaluatePerformance, from: PatternBacktest.mqh }
+  - { name: ExitEngine_SetBestForRegime, from: ExitEngine.mqh }
+  - { name: Exit_* defaults (Exit_ATR_K_Default, Exit_ATR_Period, Exit_Swing_N_Default, Exit_Swing_OffsetPts, Exit_HYB_*), from: ExitEngine.mqh }
+  - { name: inputExecuteMarginPoints/inputUseSLMethod/inputSLMultiplier/inputSLPoints/inputTPMultiplier/inputPendingExpiryBars, from: Zmienne11.mqh }
+  - { name: DebugOptimizer/DebugPatternImpulse/DebugPatternEval, from: Zmienne11.mqh }
+
+functions_defined_here:
+  - name: ZVol
+    does: "skrót do GetStandardizedVolume(shift)"
+    calls: [ GetStandardizedVolume ]
+    uses_globals: []
+  - name: ZRange
+    does: "skrót do GetStandardizedRange(shift)"
+    calls: [ GetStandardizedRange ]
+    uses_globals: []
+  - name: __Percentile
+    does: "percentyl z tablicy (kopiuj+sortuj+interpoluj)"
+    calls: [ ArrayResize, ArraySort, MathFloor, MathCeil ]
+    uses_globals: []
+  - name: RecommendDetectorThresholds
+    does: "profil rozkładu |Zr|/|Zv| i rekomendacja progów IMP_ZR_MIN/IMP_ZV_MIN"
+    calls: [ ArraySize, MathMin, MathMax, ArrayResize, MathAbs, __Percentile, PrintFormat ]
+    uses_globals: [ candleHistory, DebugOptimizer ]
+  - name: ValidateImpulseDetectorStats
+    does: "zlicza pass CheckImpulseConditions per-regime w lookback"
+    calls: [ ArraySize, MathMin, MathMax, ArrayInitialize, DetectRegimeKey, CheckImpulseConditions, PrintFormat ]
+    uses_globals: [ candleHistory, DebugOptimizer, NUM_REGIMES ]
+  - name: OptimizeImpulsePattern (legacy)
+    does: "grid progów impulsu R/V/ADX/ΔDI + szybka symulacja (legacy)"
+    calls: [ ArraySize, MathMin, MathMax, ComputeCustomADX, Print, PrintFormat, GetCustomADXAt, GetCustomPlusDIAt, GetCustomMinusDIAt, SymbolInfoDouble, CalculateSLAndTP, SimulatePendingAndTradePoints, EvaluatePerformance ]
+    uses_globals: [ candleHistory, inputExecuteMarginPoints, inputUseSLMethod, inputSLMultiplier, inputSLPoints, inputTPMultiplier, inputPendingExpiryBars, _Symbol, impulseRangeFactor, impulseVolumeFactor, impulseAdxThreshold, impulseMinDiffDI, DebugPatternImpulse, maxTestCandles ]
+  - name: ConfirmAccumulation (legacy)
+    does: "warunki akumulacji + krótka kontynuacja"
+    calls: [ GetCurrentSessionAverageRange, GetCurrentSessionAverageVolume, GetCustomADXAt, GetCustomPlusDIAt, GetCustomMinusDIAt ]
+    uses_globals: [ candleHistory, accumulationRangeFactor, accumulationVolumeFactor ]
+  - name: OptimizeAccumulationPattern (legacy)
+    does: "grid r,v akumulacji – wybiera najlepsze wg confirm rate"
+    calls: [ ArraySize, MathMin, MathMax, ConfirmAccumulation ]
+    uses_globals: [ candleHistory, accumulationRangeFactor, accumulationVolumeFactor, maxTestCandles ]
+  - name: ConfirmFakeBreakout (legacy)
+    does: "heurystyka fałszywego wybicia względem świec i-1 oraz i+1"
+    calls: []
+    uses_globals: [ candleHistory ]
+  - name: OptimizeFakeBreakoutPattern (legacy)
+    does: "grid progów FB (r1,r2,v) – ocena confirm rate"
+    calls: [ ArraySize, MathMin, MathMax, ConfirmFakeBreakout ]
+    uses_globals: [ candleHistory, fakeBreakoutRangeMinFactor, fakeBreakoutRangeMaxFactor, fakeBreakoutVolumeFactor, maxTestCandles ]
+  - name: MaybeOptimizeParametersHistorical
+    does: "periodyczna auto-optymalizacja (zmiana sesji/liczniki) + rekomendacje Z + walidacje + exits-per-regime"
+    calls: [ GetSession, IsSessionDataReady, SessionTypeToString, GetCurrentSessionAverageRange, GetCurrentSessionAverageVolume, RecommendDetectorThresholds, ValidateImpulseDetectorStats, OptimizeExitsPerRegime, PrintFormat, Print ]
+    uses_globals: [ candleHistory, impulseLiveCandleCounter, lastOptimizedSession, impulseCandlesSinceLastDetection, lastGoodImpulseRangeFactor, lastGoodImpulseVolumeFactor, lastGoodImpulseAdxThreshold, lastGoodImpulseMinDiffDI, DebugPatternEval ]
+  - name: ForceOptimizeParametersHistorical
+    does: "pełny pass optymalizacyjny na starcie (bootstrap-aware)"
+    calls: [ AnalyzeInitialSessionRangesAndVolumes, RecommendDetectorThresholds, ValidateImpulseDetectorStats, OptimizeExitsPerRegime, PrintFormat, Print ]
+    uses_globals: [ candleHistory, DebugPatternEval ]
+  - name: OptimizeExitsPerRegime
+    does: "wybór najlepszej polityki wyjścia (ATR/SWING/HYB) per-regime po symulacji"
+    calls: [ ArraySize, MathMax, MathMin, ComputeCustomADX, DetectRegimeKey, CheckImpulseConditions, SymbolInfoDouble, CalculateSLAndTP, SimulateTradeWithExit, EvaluatePerformance, ExitEngine_SetBestForRegime, PrintFormat ]
+    uses_globals: [ candleHistory, _Symbol, inputExecuteMarginPoints, inputUseSLMethod, inputSLMultiplier, inputSLPoints, inputTPMultiplier, inputPendingExpiryBars, Exit_ATR_K_Default, Exit_ATR_Period, Exit_Swing_N_Default, Exit_Swing_OffsetPts, Exit_HYB_TP1_R, Exit_HYB_BE_After_R, Exit_HYB_TrailATR_K, Exit_HYB_TimeStop_Bars, Exit_HYB_TimeStop_MinR, Exit_HYB_PartialFrac, CAND_ATR_K, CAND_SWING_N, CAND_SWING_OFF, CAND_HYB_BE_R, CAND_HYB_TRAIL_K, NUM_REGIMES, DebugOptimizer, maxTestCandles ]
+
+cross_module_links:
+  - { from: PatternOptymalizer11.mqh:impulseCandlesSinceLastDetection, to: PatternDetector11.mqh:DetectLivePatternAndDraw (inkrement/zerowanie) }
+  - { from: PatternOptymalizer11.mqh:MaybeOptimizeParametersHistorical/ForceOptimizeParametersHistorical, to: ExitEngine.mqh:ExitEngine_SetBestForRegime }
+  - { from: OptimizeExitsPerRegime -> PatternBacktest.mqh, via: SimulateTradeWithExit/EvaluatePerformance }
+  - { from: OptimizeExitsPerRegime -> Position_Size11.mqh, via: CalculateSLAndTP }
+  - { from: OptimizeExitsPerRegime/ValidateImpulseDetectorStats -> PatternDetector11.mqh, via: CheckImpulseConditions/DetectRegimeKey }
+
+notes:
+  - "Sekcja *legacy* zachowana ze względu na kompatybilność; bieżąca logika opiera się głównie na OptimizeExitsPerRegime + diagnostyce progów Z."
+  - "Auto-optymalizacja uruchamia się po zmianie sesji i/lub co kilka barów, jeśli dane sesji są gotowe."
+
+
+# ===========================
+# PeaksEnded.mqh
+# ===========================
+
+file: PeaksEnded.mqh
+
+extern_or_input_refs:
+  - { name: _Symbol, type: "string (platform)", from: "MQL5", access: "read" }
+  - { name: PERIOD_CURRENT, type: "ENUM_TIMEFRAMES (platform)", from: "MQL5", access: "read" }
+  - { name: iHighest, type: "func (MQL5)", sig: "int iHighest(string, ENUM_TIMEFRAMES, ENUM_SERIESMODE, int, int)", access: "call" }
+  - { name: iLowest,  type: "func (MQL5)", sig: "int iLowest(string, ENUM_TIMEFRAMES, ENUM_SERIESMODE, int, int)", access: "call" }
+  - { name: iHigh,    type: "func (MQL5)", sig: "double iHigh(string, ENUM_TIMEFRAMES, int)", access: "call" }
+  - { name: iLow,     type: "func (MQL5)", sig: "double iLow(string, ENUM_TIMEFRAMES, int)", access: "call" }
+  - { name: iTime,    type: "func (MQL5)", sig: "datetime iTime(string, ENUM_TIMEFRAMES, int)", access: "call" }
+  - { name: iClose,   type: "func (MQL5)", sig: "double iClose(string, ENUM_TIMEFRAMES, int)", access: "call" }
+  - { name: MODE_HIGH/MODE_LOW, type: "enum/int (compat)", from: "MQL4-compat layer in MQL5", access: "read" }
+
+globals:
+  - { name: Inpshoulder, type: int, init: 3, role: "szerokość 'ramienia' lokalnego ekstremum (liczba barów dookoła)" }
+  - { name: Highs, type: "Peak[20]", init: "default", role: "bufor ostatnich szczytów (index/value/time/isValid)" }
+  - { name: Lows,  type: "Peak[20]", init: "default", role: "bufor ostatnich dołków (index/value/time/isValid)" }
+
+types:
+  - name: Peak
+    kind: struct
+    fields:
+      - { name: index,   type: int,      role: "indeks świecy w historii symbolu" }
+      - { name: value,   type: double,   role: "wartość ceny ekstremum (high/low)" }
+      - { name: isValid, type: bool,     role: "flaga ważności poziomu po filtracji" }
+      - { name: time,    type: datetime, role: "czas świecy dla ekstremum" }
+
+functions:
+  - name: FindPeak
+    signature: "int FindPeak(int mode, int count, int startBar)"
+    description: "Iteracyjna lokalizacja lokalnego ekstremum (MODE_HIGH/LOW) aż do zbieżności indeksu."
+    reads:
+      - { var: _Symbol/PERIOD_CURRENT, how: "pośrednio przez FindNextPeak→iHighest/iLowest" }
+    writes: []
+    calls:
+      - { fn: FindNextPeak, why: "znalezienie kandydata i stabilizacja" }
+    returns: "int (index>=0 lub -1 gdy niepoprawny mode)"
+
+  - name: FindNextPeak
+    signature: "int FindNextPeak(int mode, int count, int startBar)"
+    description: "Rzutuje MODE_HIGH/LOW na ENUM_SERIESMODE i wywołuje iHighest/iLowest."
+    reads:
+      - { var: _Symbol, how: "parametr do wywołań funkcji platformowych" }
+      - { var: PERIOD_CURRENT, how: "timeframe" }
+    writes: []
+    calls:
+      - { fn: iHighest/iLowest, why: "pozycja lokalnego maksimum/minimum w zakresie" }
+    returns: "int (index>=0)"
+
+  - name: Peaks
+    signature: "void Peaks()"
+    description: "Wypełnia tablice Highs/Lows: index/value/time oraz isValid=true dla znalezionych rekordów."
+    reads:
+      - { var: Inpshoulder, how: "rozmiar okna szukania" }
+      - { var: _Symbol/PERIOD_CURRENT, how: "parametry do iHigh/iLow/iTime" }
+    writes:
+      - { var: Highs[], how: "index/value/time/isValid" }
+      - { var: Lows[],  how: "index/value/time/isValid" }
+    calls:
+      - { fn: FindPeak }
+      - { fn: iHigh/iLow/iTime }
+    returns: "void"
+
+  - name: FilterPeaks
+    signature: "void FilterPeaks()"
+    description: "Unieważnia Highs/Lows[i] jeśli późniejsze świece spełnią warunek naruszenia (iHigh/iLow + prevClose)."
+    reads:
+      - { var: Highs[], how: "index/value/isValid" }
+      - { var: Lows[],  how: "index/value/isValid" }
+      - { var: _Symbol/PERIOD_CURRENT, how: "do iHigh/iLow/iClose" }
+    writes:
+      - { var: Highs[].isValid, how: "set=false" }
+      - { var: Lows[].isValid,  how: "set=false" }
+    calls:
+      - { fn: iHigh/iLow/iClose }
+    returns: "void"
+
+cross_module_links:
+  uses:
+    - { from: "PeaksEnded.mqh", to: "MQL5 platform", what: "iHighest/iLowest/iHigh/iLow/iTime/iClose; _Symbol; PERIOD_CURRENT" }
+    - { from: "PeaksEnded.mqh", to: "StartTester/CandleAndTranactionData11.mqh", what: "wspólne zależności projektu" }
+  provides:
+    - { name: Highs/Lows (Peak[20]), for: ["moduły rysujące S/R/ZZB", "analiza formacji odwrócenia/wybicia"] }
+    - { name: FindPeak/FindNextPeak/Peaks/FilterPeaks, for: ["dowolne moduły potrzebujące swingów"] }
+
+# =========================================================
+# PositionSizeManager11.mqh — mapa funkcji i powiązań (v2)
+# =========================================================
+
+file: PositionSizeManager11.mqh
+
+includes:
+  - <Trade/Trade.mqh>
+  - <StartTester/Zmienne11.mqh>
+  - <StartTester/AvarageCandleAndVolume11.mqh>
+  - <StartTester/PeaksEnded11.mqh>
+  - <StartTester/trenddetector11.mqh>
+
+globals_provided:
+  - name: trade
+    type: CTrade
+    role: "Wykonuje operacje handlowe (zamknięcia, kasowanie zleceń, modyfikacje)."
+
+globals_used_external:
+  - { name: _Symbol, type: string, source: "MQL5", role: "bieżący symbol" }
+  - { name: _Period, type: ENUM_TIMEFRAMES, source: "MQL5", role: "bieżący TF" }
+  - { name: _Digits, type: int, source: "MQL5", role: "precyzja zaokrągleń" }
+  - { name: hourToClose, type: int, source: "Zmienne11.mqh", role: "godzina auto-zamykania" }
+  - { name: candleCountToWait, type: int, source: "Zmienne11.mqh", role: "liczba świec do odczekania do zamknięcia" }
+  - { name: inputMagicNumber, type: ulong, source: "Zmienne11.mqh", role: "magic do filtrowania" }
+  - { name: inputAccountRiskCapital, type: double, source: "Zmienne11.mqh", role: "kapitał ryzyka (opcjonalny override)" }
+  - { name: inputRSIPeriod, type: int, source: "Zmienne11.mqh", role: "okres RSI (0=wył.)" }
+  - { name: rsiHandle, type: int/long, source: "trenddetector11.mqh / Zmienne11.mqh", role: "uchwyt wskaźnika RSI" }
+  - { name: inputRsiSlCandleToWait, type: int, source: "Zmienne11.mqh", role: "ile świec czekać do zamknięcia odwróceniowego RSI" }
+  - { name: inputTrailingStop, type: bool, source: "Zmienne11.mqh", role: "włącz/wyłącz trailing stop" }
+  - { name: candleHistory, type: "MqlRates[]", source: "AvarageCandleAndVolume11.mqh / CandleAndTranactionData", role: "bufor świec; [1] to świeca zamknięta" }
+  - { name: activeOrdersAndPositions, type: "OrderPositionData[]", source: "CandleAndTranactionData11.mqh", role: "zlecenia i pozycje" }
+  - { name: Highs, type: "Peak[20]", source: "PeaksEnded11.mqh", role: "szczyty" }
+  - { name: Lows, type: "Peak[20]", source: "PeaksEnded11.mqh", role: "dołki" }
+  - { name: maxHigh, type: double, source: "AvarageCandleAndVolume11.mqh", role: "najwyższa cena z okna konsolidacji" }
+  - { name: minLow, type: double, source: "AvarageCandleAndVolume11.mqh", role: "najniższa cena z okna konsolidacji" }
+
+types_used:
+  - { name: OrderPositionData, source: "CandleAndTranactionData11.mqh", role: "rekord pozycji/zlecenia (isOpen/isPending/symbol/magic/ticket/sl/tp/openTime/type...)" }
+  - { name: Peak, source: "PeaksEnded11.mqh", role: "ekstremum (index/value/time/isValid)" }
+
+functions:
+  - name: CalculateLotSize
+    signature: "double CalculateLotSize(double stopLossDistancePoints, double stopLossPrice, double marketPrice, double FixedLot, int CalculationMode, double AccountRiskCapital, double RiskPercentage)"
+    description: "Zwraca loty bazując na stałym lot lub procencie ryzyka; dopasowuje do volume step/min/max."
+    reads:
+      - _Symbol
+      - inputAccountRiskCapital
+    calls:
+      - SymbolInfoDouble(SYMBOL_TRADE_TICK_VALUE / SYMBOL_TRADE_TICK_SIZE / SYMBOL_VOLUME_*)
+      - AccountInfoDouble(ACCOUNT_MARGIN_FREE)
+      - NormalizeDouble
+    returns: "double lotSize (2 miejsca po przecinku)"
+
+  - name: CalculateSLAndTP
+    signature: "void CalculateSLAndTP(double &stopLossPrice, double &takeProfitPrice, int UseSLMethod, double entryPrice, bool isBuy, double SLMultiplier, double SLPoints, double TPMultiplier)"
+    description: "Ustala SL/TP według wybranej metody (swing/konsolidacja/punkty/świeca)."
+    reads:
+      - _Symbol
+      - _Digits
+      - Highs[], Lows[]
+      - candleHistory[]
+      - maxHigh, minLow
+    calls:
+      - SymbolInfoDouble
+      - SymbolInfoInteger
+      - NormalizeDouble
+      - Print
+    returns: "n/a (parametry przez referencję)"
+
+  - name: CheckClosingConditions
+    signature: "void CheckClosingConditions()"
+    description: "Zamyka pozycje wg godzin (hourToClose) lub po upływie N świec (candleCountToWait)."
+    reads:
+      - hourToClose
+      - candleCountToWait
+      - inputMagicNumber
+      - activeOrdersAndPositions[]
+      - _Symbol
+      - _Period
+    calls:
+      - TimeCurrent
+      - TimeToStruct
+      - CloseOrdersAndPositions
+      - PeriodSeconds
+      - Print
+    returns: "void"
+
+  - name: CancelOldPendingOrders
+    signature: "void CancelOldPendingOrders(int maxBarsToWait, ulong magicNumber)"
+    description: "Usuwa przeterminowane zlecenia oczekujące (starsze niż maxBarsToWait świec)."
+    reads:
+      - candleHistory[]
+      - activeOrdersAndPositions[]
+      - _Symbol
+      - PrintCancelOldPendingOrders
+    calls:
+      - RefreshOrderAndPositionData
+      - FindIndexByTime
+      - OrderSelect
+      - trade.OrderDelete
+      - Print / PrintFormat
+    returns: "void"
+
+  - name: CloseOrdersAndPositions
+    signature: "void CloseOrdersAndPositions()"
+    description: "Zamyka pozycje i kasuje zlecenia oczekujące dla bieżącego symbolu i magic."
+    reads:
+      - activeOrdersAndPositions[]
+      - _Symbol
+      - inputMagicNumber
+    calls:
+      - trade.PositionClose(symbol)
+      - trade.OrderDelete(ticket)
+      - PrintFormat
+    returns: "void"
+
+  - name: ClosePositionsByRSI
+    signature: "void ClosePositionsByRSI(ulong magicNumber, double rsiLevelOverbought, double rsiLevelOversold, double rsiSlLevel)"
+    description: "Zamyka pozycje na bazie warunków RSI po minimalnej liczbie świec od otwarcia. (poprawka: PositionClose(symbol))."
+    reads:
+      - inputRSIPeriod
+      - rsiHandle
+      - inputRsiSlCandleToWait
+      - activeOrdersAndPositions[]
+      - _Symbol
+    calls:
+      - CopyBuffer
+      - trade.PositionClose(symbol)
+      - RefreshOrderAndPositionData
+      - TimeCurrent
+      - PeriodSeconds
+      - Print / PrintFormat
+    returns: "void"
+
+  - name: ApplyTrailingStop
+    signature: "void ApplyTrailingStop(ulong magicNumber)"
+    description: "Przesuwa SL za Highs[2]/Lows[2] ± bufor; sprawdza dostępność i ważność ekstremów."
+    reads:
+      - inputTrailingStop
+      - activeOrdersAndPositions[]
+      - Highs[], Lows[]
+      - _Symbol
+    calls:
+      - SymbolInfoDouble
+      - ModifyStopLoss
+    returns: "void"
+
+  - name: ApplyCandleBasedTrailingStop
+    signature: "void ApplyCandleBasedTrailingStop(ulong magicNumber)"
+    description: "Trailing po każdej zamkniętej świecy candleHistory[1] z buforem; dodatkowe zabezpieczenia danych."
+    reads:
+      - candleHistory[]
+      - activeOrdersAndPositions[]
+      - _Digits
+      - _Symbol
+    calls:
+      - SymbolInfoDouble
+      - ModifyStopLoss
+      - NormalizeDouble
+    returns: "void"
+
+  - name: ModifyStopLoss
+    signature: "void ModifyStopLoss(ulong ticket, double newSL)"
+    description: "Wysyła TRADE_ACTION_SLTP; przed pobraniem TP wykonuje PositionSelectByTicket(ticket)."
+    reads: []
+    calls:
+      - PositionSelectByTicket
+      - PositionGetDouble(POSITION_TP)
+      - OrderSend
+      - Print
+    returns: "void"
+
+cross_links:
+  uses:
+    - { from: "PositionSizeManager11.mqh", to: "PeaksEnded11.mqh", what: "Highs[], Lows[] (swings dla SL/TS)" }
+    - { from: "PositionSizeManager11.mqh", to: "AvarageCandleAndVolume11.mqh", what: "candleHistory[], maxHigh/minLow" }
+    - { from: "PositionSizeManager11.mqh", to: "Zmienne11.mqh", what: "inputy: magic/hourToClose/RSI/trailing/risk capital" }
+  provides:
+    - { name: CalculateLotSize, for: ["moduły egzekucji zleceń"] }
+    - { name: CalculateSLAndTP, for: ["detektor/egzekucja/optimizery"] }
+    - { name: CloseOrdersAndPositions, for: ["moduły zarządzania ryzykiem/wyjścia awaryjne"] }
+    - { name: CancelOldPendingOrders, for: ["scheduler/porządkowanie kolejek zleceń"] }
+    - { name: trailing (ApplyTrailingStop/ApplyCandleBasedTrailingStop), for: ["silnik wyjść"] }
+    - { name: ClosePositionsByRSI, for: ["reguły zamykania pozycji wg wskaźników"] }
+
+# =========================================================
+# RangeAndVolumeAnalyzer11.mqh — mapa funkcji i powiązań
+# =========================================================
+
+file: RangeAndVolumeAnalyzer11.mqh
+
+depends_on:
+  - StartTester/Zmienne11.mqh
+  - StartTester/CandleAndTranactionData11.mqh
+
+exports_types:
+  - name: SessionType
+    values: [SESSION_TOKYO, SESSION_LONDON, SESSION_NEWYORK, SESSION_UNKNOWN]
+
+globals_state:
+  ring_buffers:
+    - { name: tokyoVolumes, size: MAX_SESSIONS }
+    - { name: londonVolumes, size: MAX_SESSIONS }
+    - { name: nyVolumes, size: MAX_SESSIONS }
+    - { name: tokyoRanges, size: MAX_SESSIONS }
+    - { name: londonRanges, size: MAX_SESSIONS }
+    - { name: nyRanges, size: MAX_SESSIONS }
+  averages:
+    - { name: avgTokyoVolume }
+    - { name: avgLondonVolume }
+    - { name: avgNYVolume }
+    - { name: avgTokyoRange }
+    - { name: avgLondonRange }
+    - { name: avgNYRange }
+  current_session:
+    - { name: currentSessionName }
+    - { name: currentSessionAvgVolume }
+    - { name: currentSessionAvgRange }
+  ring_counters_indices:
+    - { name: tokyoVolCount, name2: tokyoVolIndex }
+    - { name: londonVolCount, name2: londonVolIndex }
+    - { name: nyVolCount, name2: nyVolIndex }
+    - { name: tokyoRangeCount, name2: tokyoRangeIndex }
+    - { name: londonRangeCount, name2: londonRangeIndex }
+    - { name: nyRangeCount, name2: nyRangeIndex }
+  last_day_keys:
+    - { name: lastTokyoDay }
+    - { name: lastLondonDay }
+    - { name: lastNYDay }
+  ready_flags:
+    - { name: sessionVolumeReady }
+    - { name: sessionRangeReady }
+  logging:
+    - { name: __SA_lastLogBar }
+
+globals_from_elsewhere:
+  - { name: candleHistory, type: MqlRates[], source: CandleAndTranactionData11.mqh }
+  - { name: DebugSessionAnalyzer, type: bool, source: Zmienne11.mqh }
+  - { name: DebugSessionAnalyzer_OnceBar, type: bool, source: Zmienne11.mqh }
+  - { name: inputUserDefinedVolumeSessionCount, type: int, source: Zmienne11.mqh }
+  - { name: inputUserDefinedRangeSessionCount, type: int, source: Zmienne11.mqh }
+  - { name: Z_MinBars, type: int, source: Zmienne11.mqh }
+  - { name: Z_Window, type: int, source: Zmienne11.mqh }
+
+public_api:
+  # Utils i sesje
+  - { name: GetDateKey(t), returns: int }
+  - { name: GetSession(t), returns: SessionType }
+  - { name: SessionTypeToString(session), returns: string }
+  - { name: SA_LogOnce(msg,tbar), returns: void }
+  - { name: SessionAnalyzer_DumpSnapshot(), returns: void }
+
+  # Ring helpers
+  - { name: RingAvg(arr[], haveCount, writeIndex, useLastN), returns: double }
+  - { name: RingStd(arr[], haveCount, writeIndex, useLastN, mean), returns: double }
+
+  # Zapis dnia sesyjnego i reset
+  - { name: PushSessionDayStat(session, avgVolPerBar, avgRangePerBar, dayKey), returns: void }
+  - { name: ResetSessionStats(), returns: void }
+
+  # Akumulatory sesji
+  - { name: ResetAgg(), returns: void }
+  - { name: ProcessBarForSessionAccumulators(candle), returns: void }
+  - { name: FinalizeAggIfAny(), returns: void }
+  - { name: AddSessionData(session, volume, range, dayKey), returns: void }
+
+  # Skany historii / live
+  - { name: AnalyzeInitialSessionRangesAndVolumes(), returns: void }
+  - { name: UpdateLiveSessionVolume(), returns: void }
+
+  # Gettery średnich i gotowości
+  - { name: IsSessionDataReady(), returns: bool }
+  - { name: GetAverageVolume(session), returns: double }
+  - { name: GetAverageRange(session), returns: double }
+  - { name: GetCurrentSessionAverageVolume(), returns: double }
+  - { name: GetCurrentSessionAverageRange(), returns: double }
+  - { name: GetStdVolume(session), returns: double }
+  - { name: GetStdRange(session), returns: double }
+
+  # Z-score (rolling i sesyjny)
+  - { name: GetStandardizedVolume(shift=1), returns: double }
+  - { name: GetStandardizedRange(shift=1), returns: double }
+
+  # Debug/kalibracja
+  - { name: DumpZStats_Range(bars=1500), returns: void }
+  - { name: DumpZStats_Volume(bars=1500), returns: void }
+
+internal_helpers:
+  - { name: __RangeAt(shift), returns: double }
+  - { name: __VolAt(shift), returns: double }
+  - { name: __Z_Local(shift, W, useRange), returns: double }
+
+cross_links:
+  provides:
+    - "GetStandardizedRange/GetStandardizedVolume → detektory (PatternDetector, Optimizer)"
+    - "GetSession/IsSessionDataReady → filtry czasu (TimeFilter w PatternDetector)"
+    - "AnalyzeInitialSessionRangesAndVolumes/UpdateLiveSessionVolume → bootstrap i live loop EA"
+  uses:
+    - "candleHistory[] (CandleAndTranactionData11.mqh)"
+    - "inputUserDefined* i Z_* (Zmienne11.mqh)"
+
+# =========================================================
+# RegimeDetector.mqh — mapa funkcji i powiązań
+# =========================================================
+
+file: RegimeDetector.mqh
+
+depends_on:
+  - StartTester/CandleAndTranactionData11.mqh   # candleHistory[], wskaźniki ADX/DI (GetCustom*At)
+
+exports_types:
+  - name: MarketRegime
+    values: [REG_TREND_STRONG, REG_TREND_WEAK, REG_CHOP, REG_VOL_SPIKE]
+
+  - name: RegimeFeatures
+    fields:
+      - { name: adx, type: double }
+      - { name: plusDI, type: double }
+      - { name: minusDI, type: double }
+      - { name: diffDI, type: double }
+      - { name: atr14, type: double }
+      - { name: atr50, type: double }
+      - { name: atrRatio, type: double }
+      - { name: bullish, type: bool }
+
+globals_config:
+  - { name: RD_ATR_FAST, type: int, default: 14, usage: "okres ATR dla cechy krótkiej" }
+  - { name: RD_ATR_SLOW, type: int, default: 50, usage: "okres ATR dla cechy długiej" }
+
+globals_from_elsewhere:
+  - { name: candleHistory, type: MqlRates[], source: CandleAndTranactionData11.mqh }
+  - { name: GetCustomADXAt(index), type: double, source: CandleAndTranactionData11.mqh / indykatory custom }
+  - { name: GetCustomPlusDIAt(index), type: double, source: jw. }
+  - { name: GetCustomMinusDIAt(index), type: double, source: jw. }
+  # (W wielu Twoich plikach występuje także ComputeCustomADX(period) – przygotowuje bufory ADX/DI)
+
+public_api:
+  - { name: RD_ATR(period, fromIndex=1), returns: double }
+  - { name: GetRegimeFeatures(index, out RegimeFeatures), returns: void }
+  - { name: ClassifyRegime(features), returns: MarketRegime }
+
+cross_links:
+  provides:
+    - "RegimeFeatures + ClassifyRegime → modul decyzyjny/filtry per-regime (np. w PatternDetector/Optimizer)"
+  uses:
+    - "candleHistory[] (high/low/close/open do ATR oraz bullish)"
+    - "GetCustomADXAt/GetCustomPlusDIAt/GetCustomMinusDIAt (bufory ADX/DI muszą być wcześniej policzone)"
+
+contracts_and_assumptions:
+  - "GetRegimeFeatures zakłada dostępność danych na indeksie `index` oraz `index+1` (przez RD_ATR)."
+  - "RD_ATR sprawdza ilość danych: zwraca 0.0 jeśli okno niepełne."
+  - "Progi w ClassifyRegime są stałe (1.5, 25, 15) – kalibracja możliwa w przyszłości."
+
+usage_examples:
+  - "RegimeFeatures f; GetRegimeFeatures(1, f); MarketRegime r = ClassifyRegime(f);"
+  - "double atr = RD_ATR(14, 1);  // użyte np. w analizie zmienności"
+
+# =========================================================
+# RegimeThresholds.mqh — mapa funkcji, typów i powiązań
+# =========================================================
+
+file: RegimeThresholds.mqh
+
+exports_types:
+  - name: RegimeThresholds
+    fields:
+      - { name: zLow,       type: double, desc: "próg dolny |Z|" }
+      - { name: zHigh,      type: double, desc: "próg górny |Z|" }
+      - { name: adxStrong,  type: double, desc: "poziom ADX dla silnego trendu" }
+      - { name: diGap,      type: int,    desc: "wymagany rozjazd DI+ vs DI-" }
+      - { name: zHyst,      type: double, desc: "histereza dla |Z|" }
+      - { name: adxHyst,    type: double, desc: "histereza dla ADX" }
+
+inputs:
+  - { name: RT_FileNameCommonCSV, type: string, default: "best_regime_thresholds.csv" }
+  - { name: RT_EnableOverrides,   type: bool,   default: false }
+  - { name: RT_Override_zLow,     type: double, default: 0.30 }
+  - { name: RT_Override_zHigh,    type: double, default: 0.80 }
+  - { name: RT_Override_adxStrong,type: double, default: 22.0 }
+  - { name: RT_Override_diGap,    type: int,    default: 6 }
+  - { name: RT_Override_zHyst,    type: double, default: 0.05 }
+  - { name: RT_Override_adxHyst,  type: double, default: 3.0 }
+
+public_api:
+  - name: __RT_CommonFilesPath(fname)
+    returns: string
+    calls: []
+    uses_globals: []
+  - name: DefaultRegimeThresholds()
+    returns: RegimeThresholds
+    calls: []
+    uses_globals: []
+  - name: ApplyRegimeThresholdsOverrides(ref t)
+    returns: void
+    calls: [ PrintFormat ]
+    uses_globals:
+      - RT_EnableOverrides
+      - RT_Override_zLow
+      - RT_Override_zHigh
+      - RT_Override_adxStrong
+      - RT_Override_diGap
+      - RT_Override_zHyst
+      - RT_Override_adxHyst
+  - name: SaveRegimeThresholds(t, fileNameCommonCSV="")
+    returns: bool
+    calls:
+      - FileOpen
+      - FileWrite
+      - FileClose
+      - __RT_CommonFilesPath
+      - Print
+    uses_globals:
+      - RT_FileNameCommonCSV
+  - name: __RT_TryLoadCSV(fname, delim, out)
+    returns: bool
+    calls:
+      - FileOpen
+      - FileReadString
+      - FileIsEnding
+      - FileClose
+      - StringFind
+      - StringCompare
+      - StringToDouble
+      - StringToInteger
+    uses_globals: []
+  - name: __rt_to_double(s)
+    returns: double
+    calls: [ StringReplace, StringToDouble ]
+    uses_globals: []
+  - name: __RT_TryLoadTXT(fname, out)
+    returns: bool
+    calls:
+      - FileOpen
+      - FileReadString
+      - FileIsEnding
+      - FileClose
+      - StringFind
+      - StringSplit
+      - __rt_to_double
+    uses_globals: []
+  - name: LoadRegimeThresholds(out, fileNameCommonCSV="")
+    returns: bool
+    calls:
+      - DefaultRegimeThresholds
+      - __RT_TryLoadTXT
+      - __RT_TryLoadCSV
+      - ApplyRegimeThresholdsOverrides
+      - Print
+      - PrintFormat
+      - __RT_CommonFilesPath
+    uses_globals:
+      - RT_FileNameCommonCSV
+      - RT_EnableOverrides
+      - RT_Override_zLow
+      - RT_Override_zHigh
+      - RT_Override_adxStrong
+      - RT_Override_diGap
+      - RT_Override_zHyst
+      - RT_Override_adxHyst
+
+cross_links:
+  provides:
+    - "Persistencja progów reżimów (z/na COMMON Files) do wykorzystania przez detektory/filtry w innych modułach."
+  consumed_by (przykłady):
+    - "RegimeDetector / PatternDetector / Optimizer — pobieranie progów (LoadRegimeThresholds)."
+    - "Narzędzia strojenia — zapis po optymalizacji (SaveRegimeThresholds)."
+
+contracts_and_assumptions:
+  - "CSV/TXT: oczekiwany nagłówek: zLow;zHigh;adxStrong;diGap;zHyst;adxHyst."
+  - "Funkcje loaderów wykonują walidację zakresów; w razie niepowodzenia zwracają false."
+  - "LoadRegimeThresholds stosuje fallback do domyślnych + możliwe overrides z inputów."
+
+file: RegimeVisualizer.mqh
+module: RegimeVisualizer
+depends_on:
+  - StartTester/CandleAndTranactionData11.mqh   # dostarcza candleHistory[]
+  - StartTester/ExitEngine.mqh                  # eksportuje DetectRegimeKey(int)
+
+globals_and_consts:
+  RV_PREFIX: "RV"             # prefiks nazw obiektów rysowanych
+  RV_MAX_BARS: 240            # domyślny zakres rysowania
+  RV_FONT_SIZE: 8             # wielkość czcionki etykiety
+  RV_PAD_PIPS: 15             # odstęp od high świecy (w pipsach)
+  colors:
+    trend_up:   [RV_UP_LOW=clrLime, RV_UP_NORMAL=clrGreen, RV_UP_HIGH=clrDarkGreen]
+    trend_down: [RV_DN_LOW=clrTomato, RV_DN_NORMAL=clrRed, RV_DN_HIGH=clrMaroon]
+    trend_flat: [RV_FL_LOW=clrSilver, RV_FL_NORMAL=clrGray, RV_FL_HIGH=clrDimGray]
+  external_data:
+    - candleHistory[]: MqlRates[] (źródło danych świec)
+  external_functions:
+    - DetectRegimeKey(i:int)->int  # klucz reżimu 0..8 (trend×vol)
+
+functions:
+  - name: RV_ObjTxtName
+    signature: string RV_ObjTxtName(datetime t)
+    purpose: Buduje unikalną nazwę obiektu tekstowego dla świecy o czasie t.
+    inputs: [t: datetime]
+    outputs: [return: string]
+    reads: [_Symbol, _Period, RV_PREFIX]
+    calls: [StringFormat]
+    writes: []
+    side_effects: none
+
+  - name: RV_ColorForRegime
+    signature: color RV_ColorForRegime(int regime)
+    purpose: Mapowanie indeksu reżimu (trend×vol) na kolor.
+    inputs: [regime: int]
+    outputs: [return: color]
+    reads: [RV_UP_LOW, RV_UP_NORMAL, RV_UP_HIGH, RV_DN_LOW, RV_DN_NORMAL, RV_DN_HIGH, RV_FL_LOW, RV_FL_NORMAL, RV_FL_HIGH]
+    calls: []
+    side_effects: none
+
+  - name: RV_KeyToString
+    signature: string RV_KeyToString(int regime)
+    purpose: Zamiana indeksu reżimu na etykietę tekstową "UP|LOW/NORMAL/HIGH" itd.
+    inputs: [regime: int]
+    outputs: [return: string]
+    calls: []
+    side_effects: none
+
+  - name: RegimeViz_Clear
+    signature: void RegimeViz_Clear()
+    purpose: Usuwa wszystkie obiekty wizualizera z bieżącego wykresu (prefiks "RV_").
+    inputs: []
+    outputs: []
+    reads: [RV_PREFIX]
+    calls: [ObjectsTotal, ObjectName, StringFind, ObjectDelete]
+    side_effects:
+      - Usuwa obiekty graficzne ChartID=0, subwindow=0, z prefiksem "RV_".
+
+  - name: RegimeViz_DrawOverlay
+    signature: void RegimeViz_DrawOverlay(int lookbackBars=RV_MAX_BARS, bool showText=true)
+    purpose: Rysuje overlay etykiet reżimu nad świecami z ostatnich N barów.
+    inputs:
+      - lookbackBars: int (domyślnie 240)
+      - showText: bool (domyślnie true)
+    outputs: []
+    reads:
+      - candleHistory[]: MqlRates[]
+      - _Symbol, _Period
+      - RV_MAX_BARS, RV_FONT_SIZE, RV_PAD_PIPS
+    calls:
+      - DetectRegimeKey(i:int)->int
+      - RV_ObjTxtName(datetime)->string
+      - RV_KeyToString(int)->string
+      - RV_ColorForRegime(int)->color
+      - PeriodSeconds, SymbolInfoDouble
+      - ObjectFind, ObjectCreate, ObjectSetInteger, ObjectSetString, ObjectMove
+    creates_objects:
+      - name_pattern: "RV_TXT_<symbol>_<period>_<time>"
+        type: OBJ_TEXT
+        props:
+          - OBJPROP_SELECTABLE=false
+          - OBJPROP_HIDDEN=true
+          - OBJPROP_BACK=false
+          - OBJPROP_FONTSIZE=RV_FONT_SIZE
+          - OBJPROP_TEXT="UP|LOW/NORMAL/HIGH"
+          - OBJPROP_COLOR=<mapped color>
+    side_effects:
+      - Tworzy/przenosi obiekty tekstowe na wykresie.
+    notes:
+      - Odstęp pionowy liczy pip = 10*point (typowe dla 5-cyfrowych).
+
+cross_module_refs:
+  exports: []
+  imports:
+    - DetectRegimeKey from ExitEngine.mqh
+    - candleHistory[] from CandleAndTranactionData11.mqh
+
+file: SmartOrderExecutor11.mqh
+module: SmartOrderExecutor
+depends_on:
+  - Trade/Trade.mqh                     # CTrade: składanie zleceń
+  - StartTester/Zmienne11.mqh           # inputy/flagii: Enable_LiveTrading, DebugOrders, itp.
+  - StartTester/Position_Size11.mqh     # CalculateSLAndTP, CalculateLotSize
+  - StartTester/BuySellFunction11.mqh   # RefreshOrderAndPositionData, HasAnyOpenOrPendingOrder
+  - StartTester/ExitEngine.mqh          # BindPolicyForSymbolPosition (wiąże politykę wyjścia)
+
+externals_provided:
+  - CTrade trade (z Trade.mqh) używany lokalnie przez funkcję
+
+globals_inputs_used:
+  - Enable_LiveTrading: bool
+  - Enable_BindExitEngine: bool
+  - DebugOrders: bool
+  - inputSLMultiplier: double
+  - inputSLPoints: double
+  - inputTPMultiplier: double
+  - inputFixedLot: double
+  - inputCalculationMode: int
+  - inputAccountRiskCapital: double
+  - inputRiskPercentage: double
+  - _Symbol: string
+  - _Period: ENUM_TIMEFRAMES
+  - _Digits: int
+
+platform_functions_used:
+  - PeriodSeconds(tf: ENUM_TIMEFRAMES) -> int          # NOWE w mapie: do wyznaczania expiry pendinga
+  - SymbolInfoDouble(_Symbol, SYMBOL_ASK/BID) -> double
+  - TimeCurrent() -> datetime
+  - TimeToString(datetime, flags) -> string
+  - Print/PrintFormat
+
+cross_module_functions_used:
+  - RefreshOrderAndPositionData() -> void
+  - HasAnyOpenOrPendingOrder(magic: ulong) -> bool
+  - CalculateSLAndTP(&sl,&tp, method:int, entry:double, isBuy:bool, SLmult:double, SLpts:double, TPmult:double) -> void
+  - CalculateLotSize(stopLossDistancePoints:double, stopLossPrice:double, marketPrice:double, FixedLot:double,
+                     CalculationMode:int, AccountRiskCapital:double, RiskPercentage:double) -> double
+  - BindPolicyForSymbolPosition(symbol:string) -> void
+
+function_index:
+  - name: ExecuteImpulseTrade
+    signature: void ExecuteImpulseTrade(bool isBuy, double adjustedPrice, datetime candleTime, int UseSLMethod, ulong magicNumber)
+    purpose: Składa zlecenie (pending z expiry równym jednej świecy TF lub rynkowe) i opcjonalnie spina z ExitEngine.
+    calls:
+      - RefreshOrderAndPositionData
+      - HasAnyOpenOrPendingOrder
+      - CalculateSLAndTP
+      - CalculateLotSize
+      - trade.SetExpertMagicNumber, trade.BuyStop, trade.SellStop, trade.Buy, trade.Sell
+      - PeriodSeconds, SymbolInfoDouble, TimeCurrent, TimeToString, Print/PrintFormat
+      - BindPolicyForSymbolPosition (gdy Enable_BindExitEngine)
+    reads:
+      - Enable_LiveTrading, Enable_BindExitEngine, DebugOrders
+      - inputSLMultiplier, inputSLPoints, inputTPMultiplier
+      - inputFixedLot, inputCalculationMode, inputAccountRiskCapital, inputRiskPercentage
+      - _Symbol, _Period, _Digits
+    writes:
+      - Zlecenia/pozycje na rachunku poprzez CTrade
+    side_effects:
+      - Zmiany w stanie rachunku (zlecenia/pozycje)
+      - Logi diagnostyczne
+
+file: SmartOrderExecutor11.mqh
+module: SmartOrderExecutor
+depends_on:
+  - Trade/Trade.mqh                     # CTrade: składanie zleceń
+  - StartTester/Zmienne11.mqh           # inputy/flagii: Enable_LiveTrading, DebugOrders, itp.
+  - StartTester/Position_Size11.mqh     # CalculateSLAndTP, CalculateLotSize
+  - StartTester/BuySellFunction11.mqh   # RefreshOrderAndPositionData, HasAnyOpenOrPendingOrder
+  - StartTester/ExitEngine.mqh          # BindPolicyForSymbolPosition (wiąże politykę wyjścia)
+
+externals_provided:
+  - CTrade trade (z Trade.mqh) używany lokalnie przez funkcję
+
+globals_inputs_used:
+  - Enable_LiveTrading: bool
+  - Enable_BindExitEngine: bool
+  - DebugOrders: bool
+  - inputSLMultiplier: double
+  - inputSLPoints: double
+  - inputTPMultiplier: double
+  - inputFixedLot: double
+  - inputCalculationMode: int
+  - inputAccountRiskCapital: double
+  - inputRiskPercentage: double
+  - _Symbol: string
+  - _Period: ENUM_TIMEFRAMES
+  - _Digits: int
+
+platform_functions_used:
+  - PeriodSeconds(tf: ENUM_TIMEFRAMES) -> int          # NOWE w mapie: do wyznaczania expiry pendinga
+  - SymbolInfoDouble(_Symbol, SYMBOL_ASK/BID) -> double
+  - TimeCurrent() -> datetime
+  - TimeToString(datetime, flags) -> string
+  - Print/PrintFormat
+
+cross_module_functions_used:
+  - RefreshOrderAndPositionData() -> void
+  - HasAnyOpenOrPendingOrder(magic: ulong) -> bool
+  - CalculateSLAndTP(&sl,&tp, method:int, entry:double, isBuy:bool, SLmult:double, SLpts:double, TPmult:double) -> void
+  - CalculateLotSize(stopLossDistancePoints:double, stopLossPrice:double, marketPrice:double, FixedLot:double,
+                     CalculationMode:int, AccountRiskCapital:double, RiskPercentage:double) -> double
+  - BindPolicyForSymbolPosition(symbol:string) -> void
+
+function_index:
+  - name: ExecuteImpulseTrade
+    signature: void ExecuteImpulseTrade(bool isBuy, double adjustedPrice, datetime candleTime, int UseSLMethod, ulong magicNumber)
+    purpose: Składa zlecenie (pending z expiry równym jednej świecy TF lub rynkowe) i opcjonalnie spina z ExitEngine.
+    calls:
+      - RefreshOrderAndPositionData
+      - HasAnyOpenOrPendingOrder
+      - CalculateSLAndTP
+      - CalculateLotSize
+      - trade.SetExpertMagicNumber, trade.BuyStop, trade.SellStop, trade.Buy, trade.Sell
+      - PeriodSeconds, SymbolInfoDouble, TimeCurrent, TimeToString, Print/PrintFormat
+      - BindPolicyForSymbolPosition (gdy Enable_BindExitEngine)
+    reads:
+      - Enable_LiveTrading, Enable_BindExitEngine, DebugOrders
+      - inputSLMultiplier, inputSLPoints, inputTPMultiplier
+      - inputFixedLot, inputCalculationMode, inputAccountRiskCapital, inputRiskPercentage
+      - _Symbol, _Period, _Digits
+    writes:
+      - Zlecenia/pozycje na rachunku poprzez CTrade
+    side_effects:
+      - Zmiany w stanie rachunku (zlecenia/pozycje)
+      - Logi diagnostyczne
+
+file: StartTester/trenddetector11.mqh
+purpose: Wykrywanie trendu (struktura HH/HL, MA/ADX, breakout/momentum) i sygnał transakcyjny.
+includes:
+  - strings/String.mqh
+  - StartTester/Zmienne11.mqh
+  - StartTester/CandleAndTranactionData11.mqh
+  - StartTester/AvarageCandleAndVolume11.mqh
+  - StartTester/PeaksEnded11.mqh
+  - StartTester/DrawingTools11.mqh
+  - StartTester/Position_Size11.mqh
+  - StartTester/BuySellFunction11.mqh
+
+inputs:
+  - TD_EMA_Period:int (domyślnie 20) – okres EMA do DetectTrendByMA
+  - TD_SMA_Period:int (domyślnie 50) – okres SMA do DetectTrendByMA
+
+externals_from_other_modules:
+  # Candle/DI/ADX/breakout/poziomy S/R – wykorzystywane przez poniższe funkcje
+  - candleHistory : array<MqlRates> (CandleAndTranactionData11.mqh)
+  - Highs[], Lows[] : array<Peak> (PeaksEnded11.mqh)
+  - SupportResistanceLevels[] : array<SupportResistanceLevel> (DrawingTools11.mqh)
+  - GetCustomADXAt(int) : double (źródło: moduł wskaźnikowy/analizy)
+  - GetCustomPlusDIAt(int) : double (źródło: moduł wskaźnikowy/analizy)
+  - GetCustomMinusDIAt(int) : double (źródło: moduł wskaźnikowy/analizy)
+  - IsValidBreakoutCandle(int, double, double, int) : bool (BuySellFunction11.mqh)
+  - inputAdxThreshold : double (Zmienne11.mqh / konfiguracja globalna)
+  - inputDiThreshold  : double (Zmienne11.mqh)
+  - inputMinDiff      : double (Zmienne11.mqh)
+
+globals_state:
+  - currentTrend: TrendType (TREND_UP/TREND_DOWN/TREND_RANGE)
+  - BuyOnly: bool
+  - SellOnly: bool
+  - isAboveResistance: bool
+  - isBelowSupport: bool
+  - isTouchingResistance: bool
+  - isTouchingSupport: bool
+  - resistancePrice: double
+  - supportPrice: double
+  - currentDirection: MarketDirection (MA-heurystyka)
+  - waitingForConfirmation: bool
+  - currentDirectionADX: MarketDirection (ADX-heurystyka)
+  - lastTradeDirectionBuy: MarketDirection
+  - lastTradeDirectionSell: MarketDirection
+  - canTradeBuyWasFalse: bool
+  - canTradeSellWasFalse: bool
+  - signalBuyPending: bool
+  - signalSellPending: bool
+
+enums:
+  - TrendType { TREND_UP, TREND_DOWN, TREND_RANGE }
+  - MarketDirection { MARKET_FLAT, MARKET_UP, MARKET_DOWN }
+
+functions:
+  - name: TD__HasWindow
+    signature: bool TD__HasWindow(const int shift, const int period)
+    purpose: Waliduje dostępność okna danych w candleHistory.
+    calls: []
+    reads_globals: [candleHistory]
+    writes_globals: []
+    returns: bool
+
+  - name: TD__SMA_Close
+    signature: double TD__SMA_Close(const int shift, const int period)
+    purpose: Oblicza SMA na CLOSE w oknie [shift..shift+period-1].
+    calls: [TD__HasWindow]
+    reads_globals: [candleHistory]
+    writes_globals: []
+    returns: double
+
+  - name: TD__EMA_Close
+    signature: double TD__EMA_Close(const int shift, const int period)
+    purpose: Oblicza EMA na CLOSE z zasianiem SMA najstarszą częścią okna.
+    calls: [TD__HasWindow, TD__SMA_Close]
+    reads_globals: [candleHistory]
+    writes_globals: []
+    returns: double
+
+  - name: DetectTrendByStructure
+    signature: void DetectTrendByStructure()
+    purpose: Klasyfikuje trend po strukturze (HH/HL vs LH/LL) na podstawie Highs/Lows.
+    calls: []
+    reads_globals: [Highs, Lows]
+    writes_globals: [currentTrend, BuyOnly, SellOnly]
+    returns: void
+
+  - name: CheckTrendLines
+    signature: void CheckTrendLines()
+    purpose: Ustala czy ostatnia świeca naruszyła/otarła się o poziomy S/R.
+    calls: []
+    reads_globals: [SupportResistanceLevels, candleHistory]
+    writes_globals: [isAboveResistance, isBelowSupport, isTouchingResistance, isTouchingSupport, resistancePrice, supportPrice]
+    returns: void
+
+  - name: IsCloseTouchedByCandleSell
+    signature: bool IsCloseTouchedByCandleSell(int startIndex, int endIndex)
+    purpose: Weryfikuje momentum (SELL) – czy w oknie low ≤ ostatni close.
+    calls: [iClose, iLow]
+    reads_globals: [_Symbol, PERIOD_CURRENT]
+    writes_globals: []
+    returns: bool
+
+  - name: IsCloseTouchedByCandleBuy
+    signature: bool IsCloseTouchedByCandleBuy(int startIndex, int endIndex)
+    purpose: Weryfikuje momentum (BUY) – czy w oknie high ≥ ostatni close.
+    calls: [iClose, iHigh]
+    reads_globals: [_Symbol, PERIOD_CURRENT]
+    writes_globals: []
+    returns: bool
+
+  - name: DetectTrendByMA
+    signature: MarketDirection DetectTrendByMA()
+    purpose: Detekcja kierunku na przecięciach EMA/SMA z potwierdzeniem ceną.
+    calls: [TD__EMA_Close, TD__SMA_Close]
+    reads_globals: [candleHistory, TD_EMA_Period, TD_SMA_Period, waitingForConfirmation, currentDirection]
+    writes_globals: [waitingForConfirmation, currentDirection]
+    returns: MarketDirection
+
+  - name: DetectTrendByADX
+    signature: MarketDirection DetectTrendByADX()
+    purpose: Detekcja kierunku na bazie ADX/DI z progami konfiguracyjnymi.
+    calls: [GetCustomADXAt, GetCustomPlusDIAt, GetCustomMinusDIAt, MathAbs]
+    reads_globals: [candleHistory, inputAdxThreshold, inputDiThreshold, inputMinDiff, currentDirectionADX]
+    writes_globals: [currentDirectionADX]
+    returns: MarketDirection
+
+  - name: CanTrade
+    signature: bool CanTrade(MarketDirection &dir, double sizeMultiplier, double volumeMultiplier, int volumeBars)
+    purpose: Konsensus MA+ADX; walidacja breakout/momentum; sterowanie sygnałem i pamięcią stanu.
+    calls: [DetectTrendByMA, DetectTrendByADX, IsValidBreakoutCandle, IsCloseTouchedByCandleBuy, IsCloseTouchedByCandleSell]
+    reads_globals: [lastTradeDirectionBuy, lastTradeDirectionSell, canTradeBuyWasFalse, canTradeSellWasFalse, signalBuyPending, signalSellPending]
+    writes_globals: [lastTradeDirectionBuy, lastTradeDirectionSell, canTradeBuyWasFalse, canTradeSellWasFalse, signalBuyPending, signalSellPending]
+    returns: bool
+
+# ===========================
+# StartTester/Zmienne11.mqh
+# ===========================
+file: StartTester/Zmienne11.mqh
+
+extern_or_input_refs: []
+globals:
+  - { name: impulseCandlesSinceLastDetection, type: "int (extern)", init: "-", role: "wspólny licznik świec bez impulsu; definiowany w innym module (Pattern_Optimizer)" }
+
+inputs_groups:
+  - group: "Rysowanie"
+    inputs:
+      - { name: inputCandleSizeDrav, type: bool, default: false }
+      - { name: inputRectangleDrav,  type: bool, default: false }
+      - { name: inputSRLineDrav,     type: bool, default: false }
+
+  - group: "Metody Handlu"
+    inputs: []
+
+  - group: "Ustawienia wybicia z prostokąta"
+    inputs:
+      - { name: userThreshold, type: double, default: 70.0 }
+      - { name: numCandlesToCheck, type: int, default: 300 }
+      - { name: userDefinedCandleCount, type: int, default: 5 }
+      - { name: inputUserDefinedVolumeSessionCount, type: int, default: 1 }
+      - { name: inputUserDefinedRangeSessionCount,  type: int, default: 1 }
+      - { name: VolumeThresholdPct, type: double, default: 150.0 }
+      - { name: RangeThresholdPct,  type: double, default: 50.0 }
+
+  - group: "Średnia świeca i wolumen"
+    inputs:
+      - { name: volumeCheckCandles, type: int, default: 100 }
+
+  - group: "Słabe wybicie"
+    inputs:
+      - { name: WeakBreakoutMaxVolumePercent, type: double, default: 80.0 }
+      - { name: WeakBreakoutMinRangePercent, type: double, default: 120.0 }
+
+  - group: " Metody Wyjścia"
+    inputs:
+      - { name: hourToClose, type: int, default: 0 }
+      - { name: candleCountToWait, type: int, default: 0 }
+
+  - group: "MagicNumber "
+    inputs:
+      - { name: inputMagicNumber, type: ulong, default: 123456 }
+      - { name: inputMagicNumberSRBrakeOut, type: ulong, default: 234567 }
+      - { name: inputMagicnumberBoxBrakeOut, type: ulong, default: 345678 }
+      - { name: inputImpulseMagicNumber, type: ulong, default: 456789 }
+
+  - group: "RSI StopLoss"
+    inputs:
+      - { name: inputRSIPeriod, type: int, default: 14 }
+      - { name: inputRsiSlCandleToWait, type: int, default: 4 }
+      - { name: inputRsiLevelOverbought, type: double, default: 70 }
+      - { name: inputRsiLevelOversold, type: double, default: 30 }
+      - { name: inputRsiSlLevel, type: double, default: 50 }
+
+  - group: "H/L Trailing Stop"
+    inputs:
+      - { name: inputTrailingStop, type: bool, default: false }
+
+  - group: " Kalkulator wielkości pozycji"
+    inputs:
+      - { name: inputCalculationMode, type: int, default: 0 }
+      - { name: inputFixedLot, type: double, default: 0.01 }
+      - { name: inputRiskPercentage, type: double, default: 3.0 }
+      - { name: inputAccountRiskCapital, type: double, default: 300.0 }
+
+  - group: "SL i TP "
+    inputs:
+      - { name: inputUseSLMethod, type: int, default: 3 }
+      - { name: inputSLMultiplier, type: double, default: 0 }
+      - { name: inputSLPoints, type: double, default: 50 }
+      - { name: inputTPMultiplier, type: double, default: 2 }
+      - { name: inputExecuteMarginPoints, type: int, default: 2 }
+
+  - group: "EMA SMA"
+    inputs:
+      - { name: inputMaValue, type: int, default: 50 }
+
+  - group: "ADX"
+    inputs:
+      - { name: inputAdxThreshold, type: double, default: 20.0 }
+      - { name: inputDiThreshold,  type: double, default: 25.0 }
+      - { name: inputMinDiff,      type: double, default: 5.0 }
+
+  - group: "Cluster Detector"
+    inputs:
+      - { name: UseATRFilter, type: bool, default: false }
+      - { name: UseVolumeFilter, type: bool, default: false }
+      - { name: UseStdDevFilter, type: bool, default: false }
+
+  - group: "Globalne parametry wyjść (domyślne)"
+    inputs:
+      - { name: Exit_ATR_Period, type: int, default: 14 }
+      - { name: Exit_ATR_K_Default, type: double, default: 2.6 }
+      - { name: Exit_Swing_N_Default, type: int, default: 8 }
+      - { name: Exit_Swing_OffsetPts, type: int, default: 8 }
+
+  - group: "Eksploracja polityk przy doborze (epsilon-greedy)"
+    inputs:
+      - { name: Exit_EpsilonGreedy, type: double, default: 0.10 }
+
+  - group: "MNOŻNIKI DETEKTORA"
+    inputs:
+      - { name: DET_ZR_Mult, type: double, default: 1.00 }
+      - { name: DET_ZV_Mult, type: double, default: 1.00 }
+
+  - group: "DETEKCJA / REGIME — mnożniki CSV"
+    inputs:
+      - { name: DET_ZR_Mults_PD, type: string, default: "1, 1, 1, 0.9, 0.9, 0.85, 1, 1, 1" }
+      - { name: DET_ZV_Mults_PD, type: string, default: "1, 1, 1, 0.9, 0.9, 0.85, 1, 1, 1" }
+
+  - group: "PENDING EXPIRY"
+    inputs:
+      - { name: inputPendingExpiryBars, type: int, default: 3 }
+
+  - group: "ANTY-DUPLIKAT"
+    inputs:
+      - { name: inputOneSignalPerBarPerDirection, type: bool, default: true }
+
+  - group: "BACKTEST — KOSZTY"
+    inputs:
+      - { name: inputSimSpreadPoints, type: int, default: 0 }
+      - { name: inputSimSlippagePoints, type: int, default: 0 }
+
+  - group: "FILTR CZASU SESJI"
+    inputs:
+      - { name: UseSessionTimeFilter, type: bool, default: false }
+      - { name: BlockFirstMinutesOfSession, type: int, default: 10 }
+      - { name: BlockLastMinutesOfSession, type: int, default: 10 }
+      - { name: BlockLastMinutesOfDay, type: int, default: 15 }
+
+  - group: "MA per-regime – AUTOMAT"
+    inputs:
+      - { name: UsePerRegimeMA, type: bool, default: true }
+      - { name: UsePerRegimeMA_Auto, type: bool, default: true }
+      - { name: MARec_RefreshEveryBars, type: int, default: 120 }
+      - { name: MARec_Lookback, type: int, default: 800 }
+      - { name: MARec_MinSamples, type: int, default: 120 }
+      - { name: MARec_FastMin, type: int, default: 10 }
+      - { name: MARec_FastMax, type: int, default: 40 }
+      - { name: MARec_FastStep, type: int, default: 2 }
+      - { name: MARec_SlowMin, type: int, default: 40 }
+      - { name: MARec_SlowMax, type: int, default: 120 }
+      - { name: MARec_SlowStep, type: int, default: 5 }
+
+  - group: "TRYB TESTOWY / GATING"
+    inputs:
+      - { name: Test_Mode, type: "enum TestStage", default: TEST_REGIME_ONLY }
+
+  - group: "Globalne przełączniki modułów"
+    inputs:
+      - { name: Enable_LiveTrading, type: bool, default: false }
+      - { name: Enable_BindExitEngine, type: bool, default: false }
+      - { name: Enable_Detector_Live, type: bool, default: true }
+
+  - group: "LOGI: Sesje / Regime / Orders / Optimizer"
+    inputs:
+      - { name: DebugSessionAnalyzer, type: bool, default: false }
+      - { name: DebugSessionAnalyzer_OnceBar, type: bool, default: false }
+      - { name: DebugRegime, type: bool, default: false }
+      - { name: DebugRegime_OnceBar, type: bool, default: false }
+      - { name: DebugOrders, type: bool, default: true }
+      - { name: DebugOptimizer, type: bool, default: false }
+      - { name: DebugMARecommend, type: bool, default: true }
+
+  - group: "Parametry detektora (lokalne _PD) + MA-soft"
+    inputs:
+      - { name: IMP_ZR_MIN_PD, type: double, default: 0.68 }
+      - { name: IMP_ZV_MIN_PD, type: double, default: 0.62 }
+      - { name: DET_ZR_Mult_PD, type: double, default: 0.8 }
+      - { name: DET_ZV_Mult_PD, type: double, default: 0.8 }
+      - { name: DET_MA_Soft, type: bool, default: true }
+      - { name: DET_MA_Soft_Tolerance, type: double, default: 0.02 }
+      - { name: DET_ADX_Mults_PD, type: string, default: "0.95,1,1,1.05,1.1,1,0.9,0.95,1" }
+      - { name: DET_DI_Mults_PD,  type: string, default: "0.95,1,1,1.05,1.1,1,0.9,0.95,1" }
+
+  - group: "Debug filtrowania czasu sesji"
+    inputs:
+      - { name: DebugTimeFilter, type: bool, default: true }
+      - { name: TimeFilterLogOnlyLiveBar, type: bool, default: false }
+      - { name: TimeFilterLogOncePerBar, type: bool, default: false }
+      - { name: DebugPatternEval, type: bool, default: false }
+      - { name: DebugPatternImpulse, type: bool, default: true }
+      - { name: DebugPatternBacktest, type: bool, default: false }
+
+  - group: "Z-score fallback"
+    inputs:
+      - { name: Z_Window, type: int, default: 200 }
+      - { name: Z_MinBars, type: int, default: 50 }
+
+  - group: "Kierunek wg MA"
+    inputs:
+      - { name: UseMA_SideDirection, type: bool, default: true }
+      - { name: UseMA_TwoCloseConfirm, type: bool, default: true }
+
+  - group: "Kalibrator Regime"
+    inputs:
+      - { name: Regime_CalibrationMode, type: bool, default: true }
+
+
+# ===========================
+# StartTester11.mq5
+# ===========================
+file: StartTester11.mq5
+
+extern_or_input_refs:
+  - { name: Zmienne11.mqh, type: "header", access: "inputs/globals" }
+  - { name: RegimeThresholds.mqh, type: "header", access: "thresholds/consts" }
+  - { name: RegimeVisualizer.mqh, type: "header", access: "visual/debug (included, not called here)" }
+
+  - { name: ClusterDetector, type: "class", from: "StartTester/ClusterDetector11.mqh", access: "construct/use" }
+  - { name: detector.EnableATRFilter/EnableVolumeFilter/EnableStdDevFilter, type: "methods", from: "StartTester/ClusterDetector11.mqh", access: "call" }
+  - { name: detector.DetectAndDrawHistoricalClusters, type: "method", from: "StartTester/ClusterDetector11.mqh", access: "call" }
+
+  - { name: ForceOptimizeParametersHistorical, type: "function", from: "StartTester/PatternOptymalizer11.mqh", access: "call" }
+  - { name: MaybeOptimizeParametersHistorical, type: "function", from: "StartTester/PatternOptymalizer11.mqh", access: "call" }
+
+  - { name: DetectLivePatternAndDraw, type: "function", from: "StartTester/PatternDetector11.mqh", access: "call" }
+  - { name: DetectHistoricalImpulsesWithProfitCheck, type: "function", from: "StartTester/PatternDetector11.mqh", access: "call" }
+  - { name: Regime_Summary, type: "function", from: "StartTester/PatternDetector11.mqh", access: "call" }
+  - { name: Detector_StageAudit, type: "function", from: "StartTester/PatternDetector11.mqh", access: "call" }
+  - { name: CheckImpulseConditions, type: "function", from: "StartTester/PatternDetector11.mqh", access: "call" }
+  - { name: __GetMultFromCsv, type: "function", from: "StartTester/PatternDetector11.mqh", access: "call" }
+
+  - { name: RefreshCandleHistory/RefreshOrderAndPositionData, type: "functions", from: "StartTester/CandleAndTranactionData11.mqh", access: "call" }
+  - { name: ComputeCustomADX/GetCustomADXAt, type: "functions", from: "StartTester/CandleAndTranactionData11.mqh", access: "call" }
+
+  - { name: UpdateLiveSessionVolume/ResetSessionStats/AnalyzeInitialSessionRangesAndVolumes, type: "functions", from: "StartTester/RangeAndVolumeAnalyzer11.mqh", access: "call" }
+  - { name: DumpZStats_Range/DumpZStats_Volume, type: "functions", from: "StartTester/RangeAndVolumeAnalyzer11.mqh", access: "call" }
+  - { name: GetStandardizedRange/GetStandardizedVolume, type: "functions", from: "StartTester/RangeAndVolumeAnalyzer11.mqh", access: "call" }
+  - { name: DetectRegimeKey, type: "function", from: "StartTester/RangeAndVolumeAnalyzer11.mqh", access: "call" }
+
+  - { name: ManageOpenPositions, type: "function", from: "StartTester/ExitEngine.mqh", access: "call" }
+
+  - { name: DetectTrendByMA/DetectTrendByADX/DetectTrendByStructure, type: "functions", from: "StartTester/trenddetector11.mqh", access: "call" }
+
+  - { name: Peaks/FilterPeaks, type: "functions", from: "StartTester/PeaksEnded11.mqh", access: "call" }
+
+  - { name: CalculateAverageCandleHeight/CalculateLastCandleHeight, type: "functions", from: "StartTester/AvarageCandleAndVolume11.mqh", access: "call" }
+
+  - { name: ExecuteImpulseTrade, type: "function", from: "StartTester/BuySellFunction11.mqh", access: "call" }
+
+globals:
+  - { name: hasDrawnHistorical, type: bool, init: true, role: "flaga jednorazowego rysowania historii" }
+  - { name: detector, type: "ClusterDetector", init: "default ctor", role: "detektor klastrów (history + filtry)" }
+  - { name: lastProcessedCandleTime, type: datetime, init: 0, role: "anty-dublet OnTick na zamkniętą świecę" }
+  - { name: BuyOnly, type: bool (extern), init: "-", role: "filtr kierunku (z innego modułu)" }
+  - { name: SellOnly, type: bool (extern), init: "-", role: "filtr kierunku (z innego modułu)" }
+
+inputs_and_consts_used:
+  - { name: Enable_Detector_Live, scope: "input/global", from: "Zmienne11.mqh" }
+  - { name: UseSessionTimeFilter, scope: "input/global", from: "Zmienne11.mqh" }
+  - { name: numCandlesToCheck, scope: "input/global", from: "Zmienne11.mqh" }
+  - { name: inputExecuteMarginPoints/inputUseSLMethod/inputMagicNumber, scope: "inputs", from: "Zmienne11.mqh" }
+  - { name: UseATRFilter/UseVolumeFilter/UseStdDevFilter, scope: "inputs", from: "Zmienne11.mqh" }
+  - { name: NUM_REGIMES, scope: "const", from: "RangeAndVolumeAnalyzer11.mqh/PatternDetector11.mqh" }
+  - { name: IMP_ZR_MIN_PD/IMP_ZV_MIN_PD, scope: "thresholds", from: "RegimeThresholds.mqh/Zmienne11.mqh" }
+  - { name: DET_ZR_Mult_PD/DET_ZV_Mult_PD, scope: "multipliers", from: "RegimeThresholds.mqh/Zmienne11.mqh" }
+  - { name: DET_ZR_Mults_PD/DET_ZV_Mults_PD, scope: "per-regime csv-like", from: "RegimeThresholds.mqh/Zmienne11.mqh" }
+  - { name: impulseAdxThreshold/impulseMinDiffDI, scope: "thresholds", from: "PatternOptymalizer11.mqh/Zmienne11.mqh" }
+
+events:
+  - name: OnInit
+    does:
+      - "seed RNG; odświeża bufory świec/ADX"
+      - "reset + analiza danych sesyjnych"
+      - "ForceOptimizeParametersHistorical + rysuje historyczne zyskowne impulsy"
+      - "włącza filtry klastra wg inputów i rysuje historyczne klastry"
+      - "dumpuje Z-score (Range/Volume)"
+
+  - name: OnTick
+    does:
+      - "refresh świec; ManageOpenPositions"
+      - "na nowej świecy: odświeża zlecenia/ADX/vol; analizy trendu i struktur; detekcja LIVE; MaybeOptimize; TestHarness; audyty"
+      - "[3A] harness: telemetry (Zr/Zv/ADX/DI, thr per-regime via CSV) + ewentualne ExecuteImpulseTrade po PASS"
+
+  - name: OnDeinit
+    does:
+      - "opcjonalny cleanup obiektów (obecnie puste)"
+
+notes:
+  - "Usunięto referencję do OptimizeMAPeriodsAllRegimes (MA-opt out)."
+  - "Log [3A][CHK] ma stały tekst 'MA=ON' (zamiast UsePerRegimeMA)."
+  - "W harness poprawny thrZV bazuje na IMP_ZV_MIN_PD."
+  - "RegimeVisualizer.mqh jest włączony, ale w tym pliku nie jest bezpośrednio wywoływany."
+  - "Zmienne maDir/adxDir są obecnie obliczane i nieużywane (telemetria/rozszerzenia pod przyszłe filtry)."
+  - "Plik nagłówkowy: 'CandleAndTranactionData11.mqh' zawiera literówkę w nazwie, ale jest spójny w projekcie."

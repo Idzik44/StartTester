@@ -101,7 +101,6 @@ void OnTick()
 
       CalculateAverageCandleHeight(numCandlesToCheck);
       CalculateLastCandleHeight();
-      CheckSmallCandleSequence(userThreshold, userDefinedCandleCount);
 
       Peaks();
       FilterPeaks();
