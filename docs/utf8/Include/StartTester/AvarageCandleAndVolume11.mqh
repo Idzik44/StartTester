@@ -15,16 +15,30 @@
 
 double avgCandleHeight;     // Zmienna przechowująca średnią wysokość świecy
 double threshold;           // Próg dla świec (procent od średniej)
-int currentCandleCount = 0; // Liczba świec w bieżącej sekwencji
 
 //datetime lastCandleTime = 0;     // Zmienna przechowująca czas ostatniej świecy
-datetime sequenceStartTime = 0;  // Zmienna przechowująca czas rozpoczęcia sekwencji
-datetime sequenceEndTime = 0;    // Zmienna przechowująca ostatni element w sekwencji
 
 double minLow = 0;        // Minimalna cena w sekwencji
 double maxHigh = 0;       // Maksymalna cena w sekwencji
 
 
+// ====================================================================
+// OPIS FUNKCJI: CalculateAverageCandleHeight
+// Co robi:
+//   Liczy średnią wysokość świecy (high-low) z ostatnich N świec.
+//   Ustawia globalne: avgCandleHeight oraz threshold (kopiuje userThreshold).
+// Woła:
+//   Wbudowane: MathMin, ArraySize, Print.
+//   Funkcje użytkownika: brak.
+// Używane zmienne globalne:
+//   - avgCandleHeight (zapis),
+//   - threshold (zapis).
+// Używane extern/input:
+//   - candleHistory (MqlRates[]) z CandleAndTranactionData11.mqh (odczyt),
+//   - userThreshold (double) z Zmienne11.mqh (odczyt).
+// Zwraca:
+//   Średnią wysokość świecy (double). Zabezpieczenie na brak danych: 0.00001.
+// ====================================================================
 double CalculateAverageCandleHeight(int candleToCheck)
 {
     double totalHeight = 0;
@@ -55,6 +69,24 @@ double CalculateAverageCandleHeight(int candleToCheck)
    int PercentOfAvg;
    
 
+// ====================================================================
+// OPIS FUNKCJI: CalculateLastCandleHeight
+// Co robi:
+//   Dla świecy o indeksie [1] wyznacza:
+//   - pełną wysokość świecy (high-low) oraz % względem avgCandleHeight,
+//   - wysokość korpusu |open-close| oraz % względem avgCandleHeight,
+//   - PercentOfAvg = % (zaokrąglony) wysokości świecy względem średniej.
+// Woła:
+//   Wbudowane: MathAbs.
+//   Funkcje użytkownika: brak.
+// Używane zmienne globalne (odczyt/zapis):
+//   - avgCandleHeight (odczyt),
+//   - CandleHeight, CandlePercentage, CandleHeightOC, CandlePercentageOC, PercentOfAvg (zapis).
+// Używane extern/input:
+//   - candleHistory[1] (MqlRates) z CandleAndTranactionData11.mqh (odczyt).
+// Zwraca:
+//   void (wyniki w zmiennych globalnych).
+// ====================================================================
 void CalculateLastCandleHeight()
 {
    double openPrice  = candleHistory[1].open;
@@ -70,11 +102,20 @@ void CalculateLastCandleHeight()
    PercentOfAvg       = (avgCandleHeight > 0) ? int((CandleHeight / avgCandleHeight) * 100) : 0;
 }
 
-// Funkcja do sprawdzania sekwencji małych świec
-bool sequenceActive = false;      // Czy aktualnie trwa sekwencja
-bool sequenceCompleted = false;  // Czy sekwencja została zakończona
-
-// Oblicz średni wolumen z ostatnich X świec
+// ====================================================================
+// OPIS FUNKCJI: CalculateAverageVolume
+// Co robi:
+//   Liczy średni tick_volume z ostatnich 'volumeCandles' świec.
+// Woła:
+//   Wbudowane: MathMin, ArraySize.
+//   Funkcje użytkownika: brak.
+// Używane zmienne globalne:
+//   (brak – funkcja działa na danych wejściowych i zwraca wynik)
+// Używane extern/input:
+//   - candleHistory (MqlRates[]) z CandleAndTranactionData11.mqh (odczyt .tick_volume).
+// Zwraca:
+//   Średni tick_volume (double); 0.0 gdy brak świec do analizy.
+// ====================================================================
 double CalculateAverageVolume(int volumeCandles)
 {
     double totalVolume = 0;
@@ -88,6 +129,22 @@ double CalculateAverageVolume(int volumeCandles)
     return (barsToCheck > 0) ? (totalVolume / barsToCheck) : 0.0;
 }
 
+// ====================================================================
+// OPIS FUNKCJI: IsValidBreakoutCandle
+// Co robi:
+//   Waliduje świecę jako „wybicie” jeśli spełnia jednocześnie dwa warunki:
+//   1) candleHeight > avgCandleHeight * sizeMultiplierLocal,
+//   2) volume       > avgVolumeLocal  * volumeMultiplierLocal,
+//   gdzie avgVolumeLocal = CalculateAverageVolume(volumeBarsLocal).
+// Woła:
+//   - CalculateAverageVolume(volumeBarsLocal).
+// Używane zmienne globalne (odczyt):
+//   - avgCandleHeight.
+// Używane extern/input:
+//   - candleHistory[index] (MqlRates) z CandleAndTranactionData11.mqh (odczyt).
+// Zwraca:
+//   true/false – czy świeca spełnia kryteria wybicia wielkością i wolumenem.
+// ====================================================================
 bool IsValidBreakoutCandle(int index,
                            double sizeMultiplierLocal,
                            double volumeMultiplierLocal,

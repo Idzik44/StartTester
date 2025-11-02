@@ -48,12 +48,26 @@ static bool sessionVolumeReady = false, sessionRangeReady = false;
 
 // ---------------------------------------------------------------------
 // Utils czasu i sesji
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: GetDateKey
+// Opis:    Tworzy klucz daty w formacie YYYYMMDD dla podanego czasu.
+// Wywołuje: TimeToStruct.
+// Używa globalnych: brak.
+// ─────────────────────────────────────────────────────────────
 int GetDateKey(datetime t)
 {
    MqlDateTime dt; TimeToStruct(t, dt);
    return dt.year * 10000 + dt.mon * 100 + dt.day;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: GetSession
+// Opis:    Określa typ sesji (TOKYO/LONDON/NEWYORK/UNKNOWN) na podstawie godziny.
+//          Mapowanie: 00–07:59 Tokyo, 08–12:59 London, 13–21:59 New York.
+// Wywołuje: TimeToStruct.
+// Używa globalnych: brak.
+// ─────────────────────────────────────────────────────────────
 SessionType GetSession(datetime t)
 {
    MqlDateTime dt; TimeToStruct(t, dt);
@@ -67,6 +81,12 @@ SessionType GetSession(datetime t)
    return SESSION_UNKNOWN;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: SessionTypeToString
+// Opis:    Zamienia typ sesji na napis do logów/HUD.
+// Wywołuje: brak.
+// Używa globalnych: brak.
+// ─────────────────────────────────────────────────────────────
 string SessionTypeToString(SessionType session)
 {
    switch(session) {
@@ -80,6 +100,13 @@ string SessionTypeToString(SessionType session)
 // ---- LOG helpery dla modułu sesji ----
 static datetime __SA_lastLogBar = 0;
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: SA_LogOnce
+// Opis:    Jednorazowy log na bar – jeśli DebugSessionAnalyzer i (opcjonalnie)
+//          DebugSessionAnalyzer_OnceBar, wypisuje komunikat maks. raz na świecę.
+// Wywołuje: Print.
+// Używa globalnych: DebugSessionAnalyzer, DebugSessionAnalyzer_OnceBar, __SA_lastLogBar.
+// ─────────────────────────────────────────────────────────────
 void SA_LogOnce(const string msg, datetime tbar)
 {
    if(!DebugSessionAnalyzer) return;
@@ -90,7 +117,14 @@ void SA_LogOnce(const string msg, datetime tbar)
    Print(msg);
 }
 
-// Jednorazowy snapshot: stan średnich i liczników (do ręcznego wywołania)
+// ─────────────────────────────────────────────────────────────
+// Funkcja: SessionAnalyzer_DumpSnapshot
+// Opis:    Jednorazowy snapshot (log) stanu gotowości i średnich/ liczników sesji.
+// Wywołuje: PrintFormat.
+// Używa globalnych: sessionVolumeReady/sessionRangeReady, *VolCount/*RangeCount,
+//                   avgTokyoVolume/avgLondonVolume/avgNYVolume,
+//                   avgTokyoRange/avgLondonRange/avgNYRange.
+// ─────────────────────────────────────────────────────────────
 void SessionAnalyzer_DumpSnapshot()
 {
    string readyV = sessionVolumeReady ? "Y" : "N";
@@ -104,6 +138,14 @@ void SessionAnalyzer_DumpSnapshot()
 
 // ---------------------------------------------------------------------
 // Ring helpers (ostatnie N elementów liczymy „wstecz” od writeIndex)
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: RingAvg
+// Thematyka: średnia po ostatnich N elementach z bufora pierścieniowego.
+// Opis:    Liczy średnią „wstecz” od writeIndex.
+// Wywołuje: MathMin.
+// Używa globalnych: MAX_SESSIONS.
+// ─────────────────────────────────────────────────────────────
 double RingAvg(const double &arr[], int haveCount, int writeIndex, int useLastN)
 {
    int n = MathMin(haveCount, useLastN);
@@ -117,6 +159,13 @@ double RingAvg(const double &arr[], int haveCount, int writeIndex, int useLastN)
    return s / n;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: RingStd
+// Thematyka: odchylenie standardowe po ostatnich N elementach bufora pierścieniowego.
+// Opis:    Liczy std „wstecz” od writeIndex na bazie średniej mean.
+// Wywołuje: MathMin, MathSqrt.
+// Używa globalnych: MAX_SESSIONS.
+// ─────────────────────────────────────────────────────────────
 double RingStd(const double &arr[], int haveCount, int writeIndex, int useLastN, double mean)
 {
    int n = MathMin(haveCount, useLastN);
@@ -133,6 +182,17 @@ double RingStd(const double &arr[], int haveCount, int writeIndex, int useLastN,
 
 // ---------------------------------------------------------------------
 // Główne wejście zapisujące DZIEŃ dla danej sesji (spójne dla całego modułu)
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: PushSessionDayStat
+// Opis:    Zapisuje uśrednione wartości (wolumen i range per bar) dla danej sesji i dnia
+//          do buforów pierścieniowych; aktualizuje flagi gotowości i średnie.
+// Wywołuje: RingAvg, PrintFormat (opcjonalnie).
+// Używa globalnych: bufory tokyo*/london*/ny*, indeksy i liczniki, last*Day,
+//                   sessionVolumeReady/sessionRangeReady,
+//                   inputUserDefinedVolumeSessionCount, inputUserDefinedRangeSessionCount,
+//                   avg*Volume, avg*Range, DebugSessionAnalyzer.
+// ─────────────────────────────────────────────────────────────
 void PushSessionDayStat(SessionType session, double avgVolPerBar, double avgRangePerBar, int dayKey)
 {
    if(session == SESSION_TOKYO){
@@ -195,6 +255,13 @@ void PushSessionDayStat(SessionType session, double avgVolPerBar, double avgRang
 
 // ---------------------------------------------------------------------
 // Reset całości
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: ResetSessionStats
+// Opis:    Zeruje bufor, liczniki, średnie i flagi gotowości; resetuje aktualną sesję.
+// Wywołuje: ArrayInitialize, Print.
+// Używa globalnych: wszystkie bufory i pola stanu modułu sesyjnego.
+// ─────────────────────────────────────────────────────────────
 void ResetSessionStats()
 {
    if(DebugSessionAnalyzer) Print("🔄 Resetowanie statystyk sesji...");
@@ -232,6 +299,11 @@ static double      aggVolSum  = 0.0;
 static double      aggRangeSum= 0.0;
 static int         aggBars    = 0;
 
+// ─────────────────────────────────────────────────────────────
+/* Funkcja: ResetAgg
+   Opis:   Resetuje zmienne akumulatora dla bieżącej sesji.
+   Wywołuje: brak.
+   Używa globalnych: aggSession, aggDayKey, aggVolSum, aggRangeSum, aggBars. */
 void ResetAgg()
 {
    aggSession = SESSION_UNKNOWN;
@@ -241,6 +313,13 @@ void ResetAgg()
    aggBars    = 0;
 }
 
+// ─────────────────────────────────────────────────────────────
+/* Funkcja: ProcessBarForSessionAccumulators
+   Opis:    Dla podanej świecy dolicza range i wolumen do akumulatora
+            aktywnej sesji; przy zmianie sesji/dnia finalizuje poprzednią
+            (PushSessionDayStat) i rozpoczyna nową.
+   Wywołuje: GetSession, GetDateKey, PushSessionDayStat.
+   Używa globalnych: aggSession, aggDayKey, aggVolSum, aggRangeSum, aggBars. */
 void ProcessBarForSessionAccumulators(const MqlRates &candle)
 {
    SessionType s = GetSession(candle.time);
@@ -271,7 +350,12 @@ void ProcessBarForSessionAccumulators(const MqlRates &candle)
    }
 }
 
-// Wywołanie na końcu skanu, żeby „dopchnąć” ostatnią sesję
+// ─────────────────────────────────────────────────────────────
+/* Funkcja: FinalizeAggIfAny
+   Opis:    Finalizuje (wypycha) zebrane dane bieżącej sesji, jeśli istnieją,
+            i resetuje akumulator.
+   Wywołuje: PushSessionDayStat, ResetAgg.
+   Używa globalnych: aggSession, aggBars, aggVolSum, aggRangeSum, aggDayKey. */
 void FinalizeAggIfAny()
 {
    if(aggSession != SESSION_UNKNOWN && aggBars > 0){
@@ -284,6 +368,13 @@ void FinalizeAggIfAny()
 
 // ---------------------------------------------------------------------
 // ZACHOWANIE KOMPATYBILNOŚCI: stare API AddSessionData() → deleguje do PushSessionDayStat()
+
+// ─────────────────────────────────────────────────────────────
+/* Funkcja: AddSessionData
+   Opis:    Zgodność wstecz: dodaje dzienny rekord dla sesji tylko raz (sprawdza last*Day),
+            a faktyczny zapis deleguje do PushSessionDayStat.
+   Wywołuje: SessionTypeToString, PushSessionDayStat, Print (opcjonalnie).
+   Używa globalnych: DebugSessionAnalyzer, lastTokyoDay/lastLondonDay/lastNYDay. */
 void AddSessionData(SessionType session, double volume, double range, int dayKey)
 {
    if (DebugSessionAnalyzer)
@@ -308,6 +399,14 @@ void AddSessionData(SessionType session, double volume, double range, int dayKey
 
 // ---------------------------------------------------------------------
 // Skany historii i LIVE
+
+// ─────────────────────────────────────────────────────────────
+/* Funkcja: AnalyzeInitialSessionRangesAndVolumes
+   Opis:    Analiza wstępna historii: resetuje stan, przelicza sesje „od najstarszej”
+            do świecy [1], agreguje dane dzienne i ustawia średnie/flagę gotowości.
+   Wywołuje: ArraySize, Print, ResetSessionStats, ResetAgg, ProcessBarForSessionAccumulators,
+             FinalizeAggIfAny, GetSession, SessionTypeToString, GetAverageVolume, GetAverageRange.
+   Używa globalnych: candleHistory[], DebugSessionAnalyzer, currentSessionName/currentSessionAvg*. */
 void AnalyzeInitialSessionRangesAndVolumes()
 {
    if(sessionVolumeReady && sessionRangeReady) return;
@@ -338,6 +437,13 @@ void AnalyzeInitialSessionRangesAndVolumes()
    currentSessionAvgRange  = GetAverageRange(curS);
 }
 
+// ─────────────────────────────────────────────────────────────
+/* Funkcja: UpdateLiveSessionVolume
+   Opis:    Tryb LIVE: na każdej nowej zamkniętej świecy [1] aktualizuje akumulator,
+            bieżącą nazwę sesji i średnie; opcjonalnie loguje jeden wpis na bar.
+   Wywołuje: ArraySize, SA_LogOnce, GetSession, SessionTypeToString,
+             GetAverageVolume, GetAverageRange, ProcessBarForSessionAccumulators.
+   Używa globalnych: candleHistory[], DebugSessionAnalyzer, currentSessionName/currentSessionAvg*. */
 void UpdateLiveSessionVolume()
 {
     static datetime lastBarTime = 0;
@@ -366,8 +472,21 @@ void UpdateLiveSessionVolume()
 
 // ---------------------------------------------------------------------
 // Gettery
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: IsSessionDataReady
+// Opis:    Zwraca true, gdy dostępne są minimalne dane sesyjne dla wolumenu i range.
+// Wywołuje: brak.
+// Używa globalnych: sessionVolumeReady, sessionRangeReady.
+// ─────────────────────────────────────────────────────────────
 bool IsSessionDataReady() { return sessionVolumeReady && sessionRangeReady; }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: GetAverageVolume
+// Opis:    Zwraca średni wolumen dla podanej sesji (ostatnie N dni wg RingAvg).
+// Wywołuje: brak.
+// Używa globalnych: avgTokyoVolume/avgLondonVolume/avgNYVolume.
+// ─────────────────────────────────────────────────────────────
 double GetAverageVolume(SessionType session)
 {
    switch(session) {
@@ -378,6 +497,12 @@ double GetAverageVolume(SessionType session)
    return 0;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: GetAverageRange
+// Opis:    Zwraca średni range dla podanej sesji (ostatnie N dni wg RingAvg).
+// Wywołuje: brak.
+// Używa globalnych: avgTokyoRange/avgLondonRange/avgNYRange.
+// ─────────────────────────────────────────────────────────────
 double GetAverageRange(SessionType session)
 {
    switch(session) {
@@ -388,10 +513,28 @@ double GetAverageRange(SessionType session)
    return 0;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: GetCurrentSessionAverageVolume
+// Opis:    Zwraca cache’owaną średnią wolumenu dla bieżącej sesji.
+// Wywołuje: brak.
+// Używa globalnych: currentSessionAvgVolume.
+// ─────────────────────────────────────────────────────────────
 double GetCurrentSessionAverageVolume() { return currentSessionAvgVolume; }
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: GetCurrentSessionAverageRange
+// Opis:    Zwraca cache’owaną średnią range dla bieżącej sesji.
+// Wywołuje: brak.
+// Używa globalnych: currentSessionAvgRange.
+// ─────────────────────────────────────────────────────────────
 double GetCurrentSessionAverageRange()  { return currentSessionAvgRange; }
 
-// Odchylenia standardowe (ostatnie N dni na sesję)
+// ─────────────────────────────────────────────────────────────
+// Funkcja: GetStdVolume
+// Opis:    Odchylenie standardowe wolumenu dla sesji (ostatnie N zapisanych dni).
+// Wywołuje: RingAvg, RingStd.
+// Używa globalnych: bufory *Volumes, *VolCount, *VolIndex, inputUserDefinedVolumeSessionCount.
+// ─────────────────────────────────────────────────────────────
 double GetStdVolume(SessionType s)
 {
    int N = inputUserDefinedVolumeSessionCount;
@@ -408,6 +551,12 @@ double GetStdVolume(SessionType s)
    return 0.0;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: GetStdRange
+// Opis:    Odchylenie standardowe range dla sesji (ostatnie N zapisanych dni).
+// Wywołuje: RingAvg, RingStd.
+// Używa globalnych: bufory *Ranges, *RangeCount, *RangeIndex, inputUserDefinedRangeSessionCount.
+// ─────────────────────────────────────────────────────────────
 double GetStdRange(SessionType s)
 {
    int N = inputUserDefinedRangeSessionCount;
@@ -426,18 +575,38 @@ double GetStdRange(SessionType s)
 
 // ---------------------------------------------------------------------
 // Rolling Z-score fallback (gdy statystyki sesji niegotowe lub sd≈0)
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: __RangeAt
+// Opis:    Range (high-low) dla świecy o podanym shift’cie.
+// Wywołuje: ArraySize.
+// Używa globalnych: candleHistory[].
+// ─────────────────────────────────────────────────────────────
 double __RangeAt(int shift)
 {
    if (shift < 0 || shift >= ArraySize(candleHistory)) return 0.0;
    return candleHistory[shift].high - candleHistory[shift].low;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: __VolAt
+// Opis:    Wolumen tickowy dla świecy o podanym shift’cie.
+// Wywołuje: ArraySize.
+// Używa globalnych: candleHistory[].
+// ─────────────────────────────────────────────────────────────
 double __VolAt(int shift)
 {
    if (shift < 0 || shift >= ArraySize(candleHistory)) return 0.0;
    return (double)candleHistory[shift].tick_volume;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: __Z_Local
+// Opis:    Lokalny Z-score w oknie W liczonym „do przodu” od shift (i..i+W-1).
+//          Używane jako fallback, gdy statystyki sesji nie są gotowe.
+// Wywołuje: ArraySize, MathMin, MathSqrt, __RangeAt/__VolAt.
+// Używa globalnych: candleHistory[], Z_MinBars, Z_Window.
+// ─────────────────────────────────────────────────────────────
 double __Z_Local(int shift, int W, bool useRange)
 {
    const int total = ArraySize(candleHistory);
@@ -471,6 +640,13 @@ double __Z_Local(int shift, int W, bool useRange)
 
 // ---------------------------------------------------------------------
 // Standaryzacja (Z-score) dla świecy `shift` (domyślnie 1)
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: GetStandardizedVolume
+// Opis:    Zwraca Z-score wolumenu świecy (sesyjny, a jeśli brak gotowości – rolling).
+// Wywołuje: GetSession, GetAverageVolume, GetStdVolume, __VolAt, __Z_Local, ArraySize.
+// Używa globalnych: candleHistory[], sessionVolumeReady, Z_Window.
+// ─────────────────────────────────────────────────────────────
 double GetStandardizedVolume(int shift=1)
 {
    if(shift < 1 || shift >= ArraySize(candleHistory)) return 0.0;
@@ -487,6 +663,12 @@ double GetStandardizedVolume(int shift=1)
    return __Z_Local(shift, Z_Window, /*useRange=*/false);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: GetStandardizedRange
+// Opis:    Zwraca Z-score range świecy (sesyjny, a jeśli brak gotowości – rolling).
+// Wywołuje: GetSession, GetAverageRange, GetStdRange, __RangeAt, __Z_Local, ArraySize.
+// Używa globalnych: candleHistory[], sessionRangeReady, Z_Window.
+// ─────────────────────────────────────────────────────────────
 double GetStandardizedRange(int shift=1)
 {
    if(shift < 1 || shift >= ArraySize(candleHistory)) return 0.0;
@@ -507,6 +689,13 @@ double GetStandardizedRange(int shift=1)
 
 // ---------------------------------------------------------------------
 // Pomocnicze: szybki dump do kalibracji progów reżimów
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: DumpZStats_Range
+// Opis:    Wypisuje statystyki |Z(range)| dla ostatnich `bars` świec (do kalibracji).
+// Wywołuje: ArraySize, GetStandardizedRange, PrintFormat, MathMin, MathAbs.
+// Używa globalnych: candleHistory[], Z_Window.
+// ─────────────────────────────────────────────────────────────
 void DumpZStats_Range(int bars=1500)
 {
    int total = ArraySize(candleHistory);
@@ -523,6 +712,12 @@ void DumpZStats_Range(int bars=1500)
                c, Z_Window, avg, mn, mx);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: DumpZStats_Volume
+// Opis:    Wypisuje statystyki |Z(volume)| dla ostatnich `bars` świec (do kalibracji).
+// Wywołuje: ArraySize, GetStandardizedVolume, PrintFormat, MathMin, MathAbs.
+// Używa globalnych: candleHistory[], Z_Window.
+// ─────────────────────────────────────────────────────────────
 void DumpZStats_Volume(int bars=1500)
 {
    int total = ArraySize(candleHistory);

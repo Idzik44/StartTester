@@ -29,6 +29,11 @@ input int   PD_UniMA_Width    = 2;          // grubość linii
 
 // ─────────────────────────────────────────────────────────────
 // CSV – tylko dla progów Z/ADX/DI (MA liczymy samodzielnie)
+// -------------------------------------------------------------------
+// Opis:  Pobiera mnożnik z CSV (po przecinkach) dla indeksu idx.
+// Wywołuje: StringSplit, StringTrimLeft/Right, StringToDouble.
+// Używa globalnych: (brak).
+// -------------------------------------------------------------------
 double __GetMultFromCsv(const string csv, int idx, double defVal=1.0)
 {
    string parts[]; int n = StringSplit(csv, ',', parts);
@@ -39,6 +44,11 @@ double __GetMultFromCsv(const string csv, int idx, double defVal=1.0)
 
 // ─────────────────────────────────────────────────────────────
 // FILTR CZASU SESJI
+// -------------------------------------------------------------------
+// Opis:  Wyznacza start i koniec godzinowy sesji dla danego czasu t.
+// Wywołuje: GetSession.
+// Używa globalnych: definicje enum SESSION_* (z modułu sesji).
+// -------------------------------------------------------------------
 void __GetSessionBounds(datetime t, int &startHour, int &endHour)
 {
    switch(GetSession(t))
@@ -50,6 +60,14 @@ void __GetSessionBounds(datetime t, int &startHour, int &endHour)
    }
 }
 
+// -------------------------------------------------------------------
+// Opis:  Sprawdza, czy bar i mieści się w dozwolonym oknie czasu sesji.
+// Wywołuje: __GetSessionBounds, TimeToStruct, PrintFormat.
+// Używa globalnych: UseSessionTimeFilter, BlockFirstMinutesOfSession,
+//                   BlockLastMinutesOfSession, BlockLastMinutesOfDay,
+//                   DebugTimeFilter, TimeFilterLogOnlyLiveBar,
+//                   TimeFilterLogOncePerBar, candleHistory[].
+// -------------------------------------------------------------------
 bool PassesSessionTimeFilter(int i)
 {
    if (!UseSessionTimeFilter) return true;
@@ -99,7 +117,11 @@ bool PassesSessionTimeFilter(int i)
 
 // ─────────────────────────────────────────────────────────────
 // MA – liczenie wartości BEZ iMA (na bazie candleHistory[])
-
+// -------------------------------------------------------------------
+// Opis:  Sprawdza, czy istnieje okno [shift..shift+period-1] w candleHistory.
+// Wywołuje: ArraySize.
+// Używa globalnych: candleHistory[].
+// -------------------------------------------------------------------
 bool __PD_HasWindow(const int shift, const int period)
 {
    const int total = ArraySize(candleHistory);
@@ -107,6 +129,11 @@ bool __PD_HasWindow(const int shift, const int period)
    return (shift + period - 1 < total);
 }
 
+// -------------------------------------------------------------------
+// Opis:  Prosta średnia ruchoma z cen zamknięcia (SMA) w oknie.
+// Wywołuje: __PD_HasWindow.
+// Używa globalnych: candleHistory[].
+// -------------------------------------------------------------------
 double __PD_SMA_Close(const int shift, const int period)
 {
    if (!__PD_HasWindow(shift, period)) return 0.0;
@@ -116,16 +143,26 @@ double __PD_SMA_Close(const int shift, const int period)
    return s / period;
 }
 
+// -------------------------------------------------------------------
+// Opis:  Wykładnicza średnia ruchoma (EMA) z cen zamknięcia.
+// Wywołuje: __PD_HasWindow, __PD_SMA_Close.
+// Używa globalnych: candleHistory[].
+// -------------------------------------------------------------------
 double __PD_EMA_Close(const int shift, const int period)
 {
    if (!__PD_HasWindow(shift, period)) return 0.0;
    const double alpha = 2.0 / (period + 1.0);
-   double ema = __PD_SMA_Close(shift, period);                 // seed
-   for (int k = shift + period - 2; k >= shift; --k)           // starsze -> nowsze
+   double ema = __PD_SMA_Close(shift, period);
+   for (int k = shift + period - 2; k >= shift; --k)
       ema = alpha * candleHistory[k].close + (1.0 - alpha) * ema;
    return ema;
 }
 
+// -------------------------------------------------------------------
+// Opis:  Smoothed MA (SMMA) z cen zamknięcia.
+// Wywołuje: __PD_HasWindow, __PD_SMA_Close.
+// Używa globalnych: candleHistory[].
+// -------------------------------------------------------------------
 double __PD_SMMA_Close(const int shift, const int period)
 {
    if (!__PD_HasWindow(shift, period)) return 0.0;
@@ -135,19 +172,28 @@ double __PD_SMMA_Close(const int shift, const int period)
    return smma;
 }
 
+// -------------------------------------------------------------------
+// Opis:  LWMA (ważona liniowo) z cen zamknięcia.
+// Wywołuje: __PD_HasWindow.
+// Używa globalnych: candleHistory[].
+// -------------------------------------------------------------------
 double __PD_LWMA_Close(const int shift, const int period)
 {
    if (!__PD_HasWindow(shift, period)) return 0.0;
    const int denom = period * (period + 1) / 2;
    double num = 0.0;
    for (int j = 0; j < period; ++j) {
-      const int w = period - j; // większa waga bliżej „teraz”
+      const int w = period - j;
       num += w * candleHistory[shift + j].close;
    }
    return num / denom;
 }
 
-// PUBLIC: zachowujemy nazwę używaną w reszcie projektu
+// -------------------------------------------------------------------
+// Opis:  Uniwersalny accessor: MA(close) wg metody method w oknie.
+// Wywołuje: __PD_SMA_Close/__PD_EMA_Close/__PD_SMMA_Close/__PD_LWMA_Close.
+// Używa globalnych: DET_MA_METHOD (domyślna metoda).
+// -------------------------------------------------------------------
 double __MA_Close_PeriodAtShift(int period, int shift, ENUM_MA_METHOD method=(ENUM_MA_METHOD)DET_MA_METHOD)
 {
    if (!__PD_HasWindow(shift, period)) return 0.0;
@@ -162,17 +208,29 @@ double __MA_Close_PeriodAtShift(int period, int shift, ENUM_MA_METHOD method=(EN
 }
 
 // ─────────────────────────────────────────────────────────────
-// MA filtr (per-regime) na CLOSE  — bez wywołania PassesMaCloseFilter(...)
+// STAŁE OKRESY MA PER-REGIME (zamiast UsePerRegimeMA/ActiveMA_*)
+#ifndef NUM_REGIMES
+  #define NUM_REGIMES 4
+#endif
+
+static const int FIXED_MA_FAST[NUM_REGIMES] = {20, 20, 20, 20};
+static const int FIXED_MA_SLOW[NUM_REGIMES] = {50, 50, 50, 50};
+
+// -------------------------------------------------------------------
+// Opis:  Sprawdza filtr MA (położenie ceny i MA fast vs MA slow) per-regime.
+// Wywołuje: DetectRegimeKey, __MA_Close_PeriodAtShift, MathMax/Min.
+// Używa globalnych: candleHistory[], DET_MA_Soft, DET_MA_Soft_Tolerance,
+//                   FIXED_MA_FAST[], FIXED_MA_SLOW[], NUM_REGIMES.
+// -------------------------------------------------------------------
 bool PassesMaCloseFilter_PerRegime(int i, bool isBuy)
 {
-   // jeśli UsePerRegimeMA==false, użyj reżimu 0 (stałych okresów)
-   int reg = UsePerRegimeMA ? DetectRegimeKey(i) : 0;
+   int reg = DetectRegimeKey(i);
    if (reg < 0 || reg >= NUM_REGIMES) reg = 0;
 
-   int fastP = ActiveMA_Fast_PerRegime[reg];
-   int slowP = ActiveMA_Slow_PerRegime[reg];
-   if (fastP <= 0)          fastP = 20;
-   if (slowP <= fastP)      slowP = fastP + 1;
+   int fastP = FIXED_MA_FAST[reg];
+   int slowP = FIXED_MA_SLOW[reg];
+   if (fastP <= 0)     fastP = 20;
+   if (slowP <= fastP) slowP = fastP + 1;
 
    const int total = ArraySize(candleHistory);
    if (i < 1 || i >= total) return false;
@@ -196,11 +254,15 @@ bool PassesMaCloseFilter_PerRegime(int i, bool isBuy)
    return (isBuy ? condBuy : condSell);
 }
 
-
 // ─────────────────────────────────────────────────────────────
 // DIAGNOSTYKA reżimu
 static datetime __REG_lastLogBar = 0;
 
+// -------------------------------------------------------------------
+// Opis:  Loguje pojedynczy bar diagnostyczny reżimu z |Zr| i |Zv|.
+// Wywołuje: DetectRegimeKey, GetStandardizedRange/Volume, TimeToString, PrintFormat.
+// Używa globalnych: DebugRegime, DebugRegime_OnceBar, __REG_lastLogBar, candleHistory[].
+// -------------------------------------------------------------------
 void Regime_LogBar(int i)
 {
    if(!DebugRegime) return;
@@ -218,7 +280,11 @@ void Regime_LogBar(int i)
                TimeToString(t, TIME_DATE|TIME_MINUTES), reg, zr, zv);
 }
 
-// Podsumowanie reżimów
+// -------------------------------------------------------------------
+// Opis:  Podsumowuje statystyki reżimów na ostatnich 'bars' słupkach.
+// Wywołuje: DetectRegimeKey, GetStandardizedRange/Volume, PrintFormat, ArrayInitialize.
+// Używa globalnych: candleHistory[], NUM_REGIMES.
+// -------------------------------------------------------------------
 void Regime_Summary(int bars=300)
 {
    int total = ArraySize(candleHistory);
@@ -246,18 +312,25 @@ void Regime_Summary(int bars=300)
    }
 }
 
-// ─────────────────────────────────────────────────────────────
-// AKTYWNE OKRESY MA dla reżimu
+// -------------------------------------------------------------------
+// Opis:  Zwraca aktualnie aktywne okresy MA (fast/slow) dla reżimu.
+// Wywołuje: (brak).
+// Używa globalnych: FIXED_MA_FAST[], FIXED_MA_SLOW[], NUM_REGIMES.
+// -------------------------------------------------------------------
 void __GetActiveMAPeriods(int reg, int &fastP, int &slowP)
 {
    if (reg < 0 || reg >= NUM_REGIMES) reg = 0;
-   fastP = ActiveMA_Fast_PerRegime[reg];
-   slowP = ActiveMA_Slow_PerRegime[reg];
+   fastP = FIXED_MA_FAST[reg];
+   slowP = FIXED_MA_SLOW[reg];
    if (fastP <= 0) fastP = 20;
    if (slowP <= fastP) slowP = fastP + 1;
 }
 
-// Histereza MA: wymagane 2 zamknięcia po tej samej stronie obu MA
+// -------------------------------------------------------------------
+// Opis:  Sprawdza „histerezę” MA: 2 kolejne zamknięcia po tej samej stronie obu MA.
+// Wywołuje: __MA_Close_PeriodAtShift, MathMax/Min.
+// Używa globalnych: candleHistory[].
+// -------------------------------------------------------------------
 bool __ComputeMASideTwoClose(int i, int fastP, int slowP, bool &isAbove2, bool &isBelow2)
 {
    const int total = ArraySize(candleHistory);
@@ -284,7 +357,35 @@ bool __ComputeMASideTwoClose(int i, int fastP, int slowP, bool &isAbove2, bool &
 }
 
 // ─────────────────────────────────────────────────────────────
-// RYSOWANIE DWÓCH LINII MA – segmentami OBJ_TREND (bez iMA)
+// POMOCNICZE: czyszczenie segmentów MA
+// -------------------------------------------------------------------
+// Opis:  Usuwa wszystkie segmenty linii o danym prefiksie (dla symbolu/TF).
+// Wywołuje: ObjectsTotal, ObjectName, StringFind, ObjectDelete.
+// Używa globalnych: _Symbol, _Period.
+// -------------------------------------------------------------------
+void __PD_DeleteAllSegmentsForPrefix(const string prefix)
+{
+   const string tagPrefix = prefix + "_seg_";
+   const string symTag    = StringFormat("_%s_%d", _Symbol, (int)_Period);
+
+   int total = (int)ObjectsTotal(0, 0, -1);
+   for (int idx = total - 1; idx >= 0; --idx)
+   {
+      string nm = ObjectName(0, idx);
+      if (StringFind(nm, tagPrefix) == 0 && StringFind(nm, symTag) >= 0)
+         ObjectDelete(0, nm);
+   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Rysowanie 2×MA – segmentami OBJ_TREND
+// -------------------------------------------------------------------
+// Opis:  Rysuje dwie MA (fast/slow) dla ostatnich 'lastBars' świec jako segmenty.
+// Wywołuje: ObjectFind/ObjectDelete, __PD_DeleteAllSegmentsForPrefix, DetectRegimeKey,
+//           __GetActiveMAPeriods, __MA_Close_PeriodAtShift, ObjectCreate, ObjectSetInteger.
+// Używa globalnych: candleHistory[], PD_UniMA_LastBars, PD_UniMA_FastCol, PD_UniMA_SlowCol,
+//                   PD_UniMA_Width, PD_UNI_FAST/PD_UNI_SLOW, _Symbol, _Period.
+// -------------------------------------------------------------------
 void PD_DrawUnifiedRegimeMA(int lastBars)
 {
    if(lastBars<=0) lastBars = 400;
@@ -292,23 +393,24 @@ void PD_DrawUnifiedRegimeMA(int lastBars)
    const int total = ArraySize(candleHistory);
    if (total < 5) return;
 
-   // (jeśli kiedyś były POLYLINE) – usuń je, żeby nie zaśmiecały
    if (ObjectFind(0, PD_UNI_FAST) >= 0) ObjectDelete(0, PD_UNI_FAST);
    if (ObjectFind(0, PD_UNI_SLOW) >= 0) ObjectDelete(0, PD_UNI_SLOW);
+
+   __PD_DeleteAllSegmentsForPrefix(PD_UNI_FAST);
+   __PD_DeleteAllSegmentsForPrefix(PD_UNI_SLOW);
 
    datetime tF[]; double vF[]; ArrayResize(tF,0); ArrayResize(vF,0);
    datetime tS[]; double vS[]; ArrayResize(tS,0); ArrayResize(vS,0);
 
-   const int upto = total - 2;                 // ostatnia zamknięta świeca
-   const int maxN = MathMin(lastBars, upto);   // ile świec rysujemy
+   const int upto = total - 2;                 
+   const int maxN = MathMin(lastBars, upto);   
 
-   // zapełniamy bufory od najstarszych do nowszych (rosnący czas)
    for (int i = maxN; i >= 1; --i)
    {
       int reg = DetectRegimeKey(i); if (reg < 0 || reg >= NUM_REGIMES) reg = 0;
       int fP, sP; __GetActiveMAPeriods(reg, fP, sP);
 
-      if (i + sP - 1 >= total) continue; // brak historii pod wolną MA
+      if (i + sP - 1 >= total) continue; 
 
       const double fastV = __MA_Close_PeriodAtShift(fP, i);
       const double slowV = __MA_Close_PeriodAtShift(sP, i);
@@ -323,57 +425,39 @@ void PD_DrawUnifiedRegimeMA(int lastBars)
       tS[ns] = tt; vS[ns] = slowV;
    }
 
-   // FAST – segmenty
    const int nF = ArraySize(tF);
    for (int k = 0; k < nF-1; ++k)
    {
       const string name = StringFormat("%s_seg_%04d_%s_%d", PD_UNI_FAST, k, _Symbol, (int)_Period);
-      if (ObjectFind(0, name) < 0)
-         ObjectCreate(0, name, OBJ_TREND, 0, tF[k], vF[k], tF[k+1], vF[k+1]);
-      else {
-         ObjectMove(0, name, 0, tF[k],   vF[k]);
-         ObjectMove(0, name, 1, tF[k+1], vF[k+1]);
-      }
+      ObjectCreate(0, name, OBJ_TREND, 0, tF[k], vF[k], tF[k+1], vF[k+1]);
       ObjectSetInteger(0, name, OBJPROP_COLOR,      (long)PD_UniMA_FastCol);
       ObjectSetInteger(0, name, OBJPROP_WIDTH,      (long)PD_UniMA_Width);
       ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT,  false);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    }
-   // posprzątaj nadmiarowe segmenty FAST
-   for (int k = MathMax(0, nF-1); ; ++k)
-   {
-      const string nm = StringFormat("%s_seg_%04d_%s_%d", PD_UNI_FAST, k, _Symbol, (int)_Period);
-      if (ObjectFind(0, nm) < 0) break;
-      ObjectDelete(0, nm);
-   }
 
-   // SLOW – segmenty
    const int nS = ArraySize(tS);
    for (int k = 0; k < nS-1; ++k)
    {
       const string name = StringFormat("%s_seg_%04d_%s_%d", PD_UNI_SLOW, k, _Symbol, (int)_Period);
-      if (ObjectFind(0, name) < 0)
-         ObjectCreate(0, name, OBJ_TREND, 0, tS[k], vS[k], tS[k+1], vS[k+1]);
-      else {
-         ObjectMove(0, name, 0, tS[k],   vS[k]);
-         ObjectMove(0, name, 1, tS[k+1], vS[k+1]);
-      }
+      ObjectCreate(0, name, OBJ_TREND, 0, tS[k], vS[k], tS[k+1], vS[k+1]); // ✅ brakujący tS[k+1]
       ObjectSetInteger(0, name, OBJPROP_COLOR,      (long)PD_UniMA_SlowCol);
       ObjectSetInteger(0, name, OBJPROP_WIDTH,      (long)PD_UniMA_Width);
       ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT,  false);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
    }
-   // posprzątaj nadmiarowe segmenty SLOW
-   for (int k = MathMax(0, nS-1); ; ++k)
-   {
-      const string nm = StringFormat("%s_seg_%04d_%s_%d", PD_UNI_SLOW, k, _Symbol, (int)_Period);
-      if (ObjectFind(0, nm) < 0) break;
-      ObjectDelete(0, nm);
-   }
 }
 
 // ─────────────────────────────────────────────────────────────
 // CHECK – sygnał impulsu + kierunek
+// -------------------------------------------------------------------
+// Opis:  Sprawdza, czy na barze i wystąpił impuls (Zr/Zv per-regime, ADX/DI, czas sesji, MA-histereza).
+// Wywołuje: GetCurrentSessionAverageRange/Volume, PassesSessionTimeFilter, DetectRegimeKey,
+//           GetStandardizedRange/Volume, __GetMultFromCsv, GetCustomADXAt/ComputeCustomADX/GetCustomPlusDIAt/GetCustomMinusDIAt,
+//           __GetActiveMAPeriods, __ComputeMASideTwoClose.
+// Używa globalnych: candleHistory[], IMP_ZR_MIN_PD/IMP_ZV_MIN_PD, DET_* (mults/csv), impulseAdxThreshold, impulseMinDiffDI,
+//                   NUM_REGIMES.
+// -------------------------------------------------------------------
 bool CheckImpulseConditions(int i, bool &isBuy)
 {
    if (i + 1 >= ArraySize(candleHistory)) return false;
@@ -410,17 +494,21 @@ bool CheckImpulseConditions(int i, bool &isBuy)
    double diff = MathAbs(pdi - mdi);
    if (diff < thrDI) return false;
 
-   // Kierunek: MA + 2 zamknięcia po tej samej stronie
    int fastP, slowP; __GetActiveMAPeriods(reg, fastP, slowP);
    bool sideAbove2=false, sideBelow2=false;
    if (!__ComputeMASideTwoClose(i, fastP, slowP, sideAbove2, sideBelow2)) return false;
 
-   isBuy = sideAbove2; // 2xAbove => BUY, 2xBelow => SELL
+   isBuy = sideAbove2; 
    return true;
 }
 
 // ─────────────────────────────────────────────────────────────
 // STRZAŁKI
+// -------------------------------------------------------------------
+// Opis:  Rysuje strzałkę BUY/SELL na barze o indeksie index.
+// Wywołuje: ObjectFind, ObjectCreate, ObjectSetInteger, TimeToString.
+// Używa globalnych: candleHistory[], _Point, kolory (clrLime/clrRed).
+// -------------------------------------------------------------------
 void DrawTradeArrowByIndex(int index, string prefix, bool isBuy, color clrOverride=-1)
 {
    if (index < 0 || index >= ArraySize(candleHistory)) return;
@@ -443,6 +531,11 @@ void DrawTradeArrowByIndex(int index, string prefix, bool isBuy, color clrOverri
    ObjectSetInteger(0, label, OBJPROP_SELECTABLE, false);
 }
 
+// -------------------------------------------------------------------
+// The same as DrawTradeArrowByIndex, ale po czasie świecy.
+// Wywołuje: FindIndexByTime, DrawTradeArrowByIndex.
+// Używa globalnych: candleHistory[].
+// -------------------------------------------------------------------
 void DrawTradeArrow(datetime t, string prefix, bool isBuy, color clrOverride=-1)
 {
    int i = FindIndexByTime(t);
@@ -450,12 +543,22 @@ void DrawTradeArrow(datetime t, string prefix, bool isBuy, color clrOverride=-1)
    DrawTradeArrowByIndex(i, prefix, isBuy, clrOverride);
 }
 
+// -------------------------------------------------------------------
+// Opis:  Legacy wrapper: określa isBuy po kolorze i deleguje do DrawTradeArrow.
+// Wywołuje: DrawTradeArrow.
+// Używa globalnych: (brak).
+// -------------------------------------------------------------------
 void DrawArrow(datetime t, string prefix, color clr) // legacy
 {
    bool isBuy = (clr == clrLime || clr == clrGreen);
    DrawTradeArrow(t, prefix, isBuy, clr);
 }
 
+// -------------------------------------------------------------------
+// Opis:  Wrapper semantyczny dla sygnału (alias do DrawTradeArrow).
+// Wywołuje: DrawTradeArrow.
+// Używa globalnych: (brak).
+// -------------------------------------------------------------------
 void DrawSignalArrow(datetime t, string prefix, bool isBuySignal, color clrOverride=-1)
 {
    DrawTradeArrow(t, prefix, isBuySignal, clrOverride);
@@ -463,6 +566,17 @@ void DrawSignalArrow(datetime t, string prefix, bool isBuySignal, color clrOverr
 
 // ─────────────────────────────────────────────────────────────
 // LIVE
+// -------------------------------------------------------------------
+// Opis:  Detektor LIVE na świecy 1: rysuje MA, weryfikuje impuls i histerezę MA,
+//        pilnuje „one-signal-per-bar-per-direction”, dostosowuje cenę do ograniczeń
+//        (stops/freeze), a następnie wywołuje ExecuteImpulseTrade.
+// Wywołuje: PD_DrawUnifiedRegimeMA, DetectRegimeKey, CheckImpulseConditions,
+//           __GetActiveMAPeriods, __ComputeMASideTwoClose, DrawTradeArrow,
+//           SymbolInfoInteger/SymbolInfoDouble, ExecuteImpulseTrade.
+// Używa globalnych: candleHistory[], inputOneSignalPerBarPerDirection, inputExecuteMarginPoints,
+//                   inputUseSLMethod, inputMagicNumber, _Point, _Symbol,
+//                   impulseCandlesSinceLastDetection (modyfikuje).
+// -------------------------------------------------------------------
 void DetectLivePatternAndDraw()
 {
    if (ArraySize(candleHistory) < 2) return;
@@ -476,7 +590,6 @@ void DetectLivePatternAndDraw()
    if (t1 == lastProcessedBarTime) return;
    lastProcessedBarTime = t1;
 
-   // odśwież 2×MA (ciągła linia z okresami per-bar/per-regime)
    PD_DrawUnifiedRegimeMA(PD_UniMA_LastBars);
 
    bool isBuy=false;
@@ -484,31 +597,11 @@ void DetectLivePatternAndDraw()
    int reg = DetectRegimeKey(i);
    if (reg < 0 || reg >= NUM_REGIMES) reg = 0;
 
-   double zr  = MathAbs(GetStandardizedRange(i));
-   double zv  = MathAbs(GetStandardizedVolume(i));
-   double thrZR = IMP_ZR_MIN_PD * DET_ZR_Mult_PD * __GetMultFromCsv(DET_ZR_Mults_PD, reg, 1.0);
-   double thrZV = IMP_ZV_MIN_PD * DET_ZV_Mult_PD * __GetMultFromCsv(DET_ZV_Mults_PD, reg, 1.0);
-
-   double adx = GetCustomADXAt(i);
-   double pdi = GetCustomPlusDIAt(i);
-   double mdi = GetCustomMinusDIAt(i);
-   if (adx < 0 || pdi < 0 || mdi < 0) {
-      ComputeCustomADX(14);
-      adx = GetCustomADXAt(i);
-      pdi = GetCustomPlusDIAt(i);
-      mdi = GetCustomMinusDIAt(i);
-   }
-   double diff = MathAbs(pdi - mdi);
-
-   double thrADX = (double)impulseAdxThreshold * __GetMultFromCsv(DET_ADX_Mults_PD, reg, 1.0);
-   double thrDI  = (double)impulseMinDiffDI    * __GetMultFromCsv(DET_DI_Mults_PD,  reg, 1.0);
-
    if (!CheckImpulseConditions(i, isBuy)) {
       impulseCandlesSinceLastDetection++;
       return;
    }
 
-   // safety – kierunek zgodny z MA (powinien już być)
    {
       int f2, s2; __GetActiveMAPeriods(reg, f2, s2);
       bool ab2=false, bl2=false;
@@ -544,6 +637,14 @@ void DetectLivePatternAndDraw()
 
 // ─────────────────────────────────────────────────────────────
 // HISTORIA
+// -------------------------------------------------------------------
+// Opis:  Skanuje historię, znajduje impulsy (CheckImpulseConditions), symuluje pending + SL/TP,
+//        i rysuje strzałkę tylko dla zyskownych przypadków.
+// Wywołuje: CheckImpulseConditions, CalculateSLAndTP, SymbolInfoDouble,
+//           SimulatePendingAndTradePoints, DrawTradeArrow, PD_DrawUnifiedRegimeMA.
+// Używa globalnych: candleHistory[], inputExecuteMarginPoints, inputUseSLMethod,
+//                   inputSLMultiplier, inputSLPoints, inputTPMultiplier, inputPendingExpiryBars, _Symbol.
+// -------------------------------------------------------------------
 void DetectHistoricalImpulsesWithProfitCheck()
 {
    if (ArraySize(candleHistory) < 50) return;
@@ -580,15 +681,19 @@ void DetectHistoricalImpulsesWithProfitCheck()
          DrawTradeArrow(candleHistory[i].time, "Hist_Imp_Profit", isBuy);
    }
 
-   // odśwież 2×MA po batchu
    PD_DrawUnifiedRegimeMA(PD_UniMA_LastBars);
 }
 
 // ─────────────────────────────────────────────────────────────
-// TEST HARNESS – wywołuj raz na zamkniętą świecę
+// TEST HARNESS
+// -------------------------------------------------------------------
+// Opis:  Tryb testowy po zamknięciu świecy: rysuje MA, ewentualnie wywołuje
+//        snapshot sesji, log reżimu albo pełną detekcję live (zgodnie z Test_Mode).
+// Wywołuje: PD_DrawUnifiedRegimeMA, SessionAnalyzer_DumpSnapshot, Regime_LogBar, DetectLivePatternAndDraw.
+// Używa globalnych: Test_Mode, DebugSessionAnalyzer, Enable_Detector_Live.
+// -------------------------------------------------------------------
 void TestHarness_OnClosedBar()
 {
-   // lekkie odświeżenie MA zawsze na nowy bar
    PD_DrawUnifiedRegimeMA(PD_UniMA_LastBars);
 
    if(Test_Mode == TEST_SESSION_ONLY)
@@ -613,6 +718,14 @@ void TestHarness_OnClosedBar()
 
 // ─────────────────────────────────────────────────────────────
 // AUDYT
+// -------------------------------------------------------------------
+// Opis:  Audyt etapów detektora w oknie lookbackBars; opcjonalnie per-regime.
+// Wywołuje: ArrayInitialize, PassesSessionTimeFilter, GetStandardizedRange/Volume,
+//           __GetMultFromCsv, GetCustomADXAt/ComputeCustomADX/GetCustomPlusDIAt/GetCustomMinusDIAt,
+//           PassesMaCloseFilter_PerRegime, CheckImpulseConditions, PrintFormat.
+// Używa globalnych: candleHistory[], NUM_REGIMES, IMP_ZR_MIN_PD/IMP_ZV_MIN_PD, DET_* mults,
+//                   impulseAdxThreshold, impulseMinDiffDI.
+// -------------------------------------------------------------------
 void Detector_StageAuditEx(const int lookbackBars, const bool perRegime)
 {
    const int total = ArraySize(candleHistory);
@@ -698,160 +811,18 @@ void Detector_StageAuditEx(const int lookbackBars, const bool perRegime)
    }
 }
 
+// -------------------------------------------------------------------
+// Opis:  Skrót do audytu – bez rozbicia per-regime.
+// Wywołuje: Detector_StageAuditEx.
+// Używa globalnych: (brak).
+// -------------------------------------------------------------------
 void Detector_StageAudit(const int lookbackBars)           { Detector_StageAuditEx(lookbackBars, false); }
+
+// -------------------------------------------------------------------
+// Opis:  Skrót do audytu – z rozbiciem per-regime.
+// Wywołuje: Detector_StageAuditEx.
+// Używa globalnych: (brak).
+// -------------------------------------------------------------------
 void Detector_StageAudit_PerRegime(const int lookbackBars) { Detector_StageAuditEx(lookbackBars, true ); }
-
-// ─────────────────────────────────────────────────────────────
-// GRID-SEARCH: fast/slow MA per-regime (bez iMA)
-// ─────────────────────────────────────────────────────────────
-
-// Ustawienia (możesz zrobić z tego inputy, jeśli chcesz)
-input bool   MA_Opt_Enable     = false;   // włącz optymalizację w OnInit
-input int    MA_Opt_ScanBars   = 300;     // ile ostatnich świec skanować
-input int    MA_Opt_MinSignals = 8;       // minimalna liczba sygnałów w danym reżimie
-
-// Kandydaci (celowo konserwatywny zakres)
-static int __MA_FastSet[] = {8,10,12,14,18,20,24,26};
-static int __MA_SlowSet[] = {26,30,34,40,50,60,80};
-
-// Lekki evaluator — podobny do tego z ExitOptimizer (net + PF/WR - DD)
-double __MAEvalScore(const double &profits[], double &profitFactor, double &maxDrawdown, double &winrate)
-{
-   int n = ArraySize(profits);
-   if(n==0){ profitFactor=0; maxDrawdown=0; winrate=0; return -1e9; }
-
-   double equity=0.0, peak=0.0, dd=0.0; maxDrawdown=0.0;
-   double profitSum=0.0, lossSum=0.0; int wins=0, losses=0;
-
-   for(int i=0;i<n;i++)
-   {
-      double p = profits[i];
-      equity += p;
-      if(equity > peak) peak = equity;
-      dd = peak - equity;
-      if(dd > maxDrawdown) maxDrawdown = dd;
-
-      if(p > 0){ profitSum += p; wins++; }
-      else if(p < 0){ lossSum += -p; losses++; }
-   }
-   winrate = (wins+losses>0 ? (double)wins/(wins+losses) : 0.0);
-   profitFactor = (lossSum>0 ? profitSum/lossSum : (wins>0 ? 10.0 : 0.0));
-
-   double net   = equity;
-   double pfCap = MathMin(profitFactor, 3.0);   // limit wpływu pojedynczych outlierów
-   double score = net
-                + 100.0*(pfCap - 1.0)
-                + 200.0*(winrate - 0.5)
-                - 0.5*maxDrawdown;
-
-   if(n < 8)       score -= 200.0;
-   else if(n < 15) score -= 60.0;
-   return score;
-}
-
-// rdzeń: optymalizacja dwóch okresów MA dla jednego reżimu
-bool OptimizeMAPeriodsForRegime(const int targetRegime,
-                                const int scanBars,
-                                const int &fastSet[], const int &slowSet[],
-                                int &bestFast, int &bestSlow, double &bestScore)
-{
-   bestScore = -1e100; bestFast=0; bestSlow=0;
-
-   // snapshot aktualnych tablic (przywrócimy po zakończeniu)
-   int fastBak[NUM_REGIMES], slowBak[NUM_REGIMES];
-   ArrayCopy(fastBak, ActiveMA_Fast_PerRegime);
-   ArrayCopy(slowBak, ActiveMA_Slow_PerRegime);
-
-   const int total = ArraySize(candleHistory);
-   if (total < 50) return false;
-   const int start = MathMax(10, total - MathMax(50, scanBars));
-
-   for (int fi=0; fi<ArraySize(fastSet); ++fi)
-   for (int si=0; si<ArraySize(slowSet); ++si)
-   {
-      const int f = fastSet[fi];
-      const int s = slowSet[si];
-      if (s <= f) continue;
-
-      ActiveMA_Fast_PerRegime[targetRegime] = f;
-      ActiveMA_Slow_PerRegime[targetRegime] = s;
-
-      double results[]; ArrayResize(results, 0);
-
-      for (int i = total-2; i >= start; --i)
-      {
-         if (DetectRegimeKey(i) != targetRegime) continue;
-         if (!PassesSessionTimeFilter(i))        continue;
-
-         // wymagane okno pod wolną MA
-         if (i + s - 1 >= total) continue;
-
-         bool isBuy=false;
-         if (!CheckImpulseConditions(i, isBuy))  continue;
-
-         // wejście jak w LIVE/HIST
-         const double point    = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-         const double breakout = isBuy ? candleHistory[i].high : candleHistory[i].low;
-         double adjusted       = isBuy ? (breakout + inputExecuteMarginPoints*point)
-                                       : (breakout - inputExecuteMarginPoints*point);
-
-         double sl=0.0, tp=0.0;
-         CalculateSLAndTP(sl, tp, inputUseSLMethod, adjusted, isBuy,
-                          inputSLMultiplier, inputSLPoints, inputTPMultiplier);
-
-         if (sl==0.0 || tp==0.0) {
-            double range = candleHistory[i].high - candleHistory[i].low;
-            double base  = MathMax(inputSLPoints*point, inputSLMultiplier*range);
-            if (base <= 0) base = 10*point;
-            if (isBuy){ sl = adjusted - base; tp = adjusted + base*inputTPMultiplier; }
-            else      { sl = adjusted + base; tp = adjusted - base*inputTPMultiplier; }
-         }
-
-         double pts=0.0;
-         bool ok = SimulatePendingAndTradePoints(i, isBuy, adjusted, sl, tp, pts, inputPendingExpiryBars);
-         if (ok) { int n=ArraySize(results); ArrayResize(results, n+1); results[n]=pts; }
-      }
-
-      if (ArraySize(results) < MA_Opt_MinSignals) continue;
-
-      double pf, dd, wr;
-      double score = __MAEvalScore(results, pf, dd, wr);
-
-      PrintFormat("[MA-OPT][reg=%d] fast=%d slow=%d | n=%d score=%.1f PF=%.2f DD=%.1f WR=%.0f%%",
-                  targetRegime, f, s, ArraySize(results), score, pf, dd, wr*100.0);
-
-      if (score > bestScore) { bestScore=score; bestFast=f; bestSlow=s; }
-   }
-
-   // restore
-   ArrayCopy(ActiveMA_Fast_PerRegime, fastBak);
-   ArrayCopy(ActiveMA_Slow_PerRegime, slowBak);
-
-   return (bestScore > -1e90);
-}
-
-// pętla po 9 reżimach — zapisuje wygrane do ActiveMA_*_PerRegime
-void OptimizeMAPeriodsAllRegimes(int scanBars)
-{
-   int bestF, bestS; double bestSc;
-
-   for (int reg=0; reg<NUM_REGIMES; ++reg)
-   {
-      bool ok = OptimizeMAPeriodsForRegime(reg, scanBars, __MA_FastSet, __MA_SlowSet, bestF, bestS, bestSc);
-      if (!ok) {
-         PrintFormat("❌ [MA-OPT] regime=%d — brak wyniku (za mała próbka?)", reg);
-         continue;
-      }
-
-      ActiveMA_Fast_PerRegime[reg] = bestF;
-      ActiveMA_Slow_PerRegime[reg] = bestS;
-
-      PrintFormat("✅ [MA-OPT] regime=%d -> FAST=%d SLOW=%d (score=%.1f)", reg, bestF, bestS, bestSc);
-   }
-
-   // po optymalizacji odśwież rysunek 2×MA
-   PD_DrawUnifiedRegimeMA(PD_UniMA_LastBars);
-}
-
 
 #endif  // __PATTERN_DETECTOR_MQH__

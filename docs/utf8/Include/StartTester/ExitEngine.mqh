@@ -44,21 +44,46 @@ struct ExitParamsHYB {
 struct ExitConfig { ExitPolicy policy; ExitParamsATR atr; ExitParamsSW sw; ExitParamsHYB hyb; ExitConfig(){} ExitConfig(const ExitConfig &src){policy=src.policy; atr=src.atr; sw=src.sw; hyb=src.hyb;} };
 
 // ====== Pomocnicze ======
+// Opis: Zamienia punkty na wartość cenową (punkty * _Point).
+// Wywołania: (brak).
+// Globalne: _Point (platforma MQL5).
 inline double Pts(double pts) { return pts * _Point; }
 
 // ===== ADX/DI lokalny cache =====
+// Opis: Zapewnia ważny uchwyt wskaźnika ADX dla danego period. Tworzy lub reużywa uchwyt.
+// Wywołania: iADX (MQL5).
+// Globalne: __adxHandle, __adxPeriodCached, _Symbol, _Period.
 static int __adxHandle = -1;
 static int __adxPeriodCached = -1;
 bool EnsureAdxHandle(int period){ if (__adxHandle != -1 && __adxPeriodCached == period) return true; __adxHandle = iADX(_Symbol, _Period, period); __adxPeriodCached = period; return (__adxHandle != -1); }
+
+// Opis: Zwraca wartość ADX na barze 'barShift' dla danego period (domyślnie 14).
+// Wywołania: EnsureAdxHandle, CopyBuffer (MQL5).
+// Globalne: __adxHandle.
 double ADX_Value   (int barShift, int period=14){ if(!EnsureAdxHandle(period))return 0.0; double b[]; if(CopyBuffer(__adxHandle,0,barShift,1,b)<=0)return 0.0; return b[0]; }
+
+// Opis: Zwraca wartość DI+ na barze 'barShift' (period domyślnie 14).
+// Wywołania: EnsureAdxHandle, CopyBuffer (MQL5).
+// Globalne: __adxHandle.
 double DIPlus_Value(int barShift, int period=14){ if(!EnsureAdxHandle(period))return 0.0; double b[]; if(CopyBuffer(__adxHandle,1,barShift,1,b)<=0)return 0.0; return b[0]; }
+
+// Opis: Zwraca wartość DI- na barze 'barShift' (period domyślnie 14).
+// Wywołania: EnsureAdxHandle, CopyBuffer (MQL5).
+// Globalne: __adxHandle.
 double DIMinus_Value(int barShift,int period=14){ if(!EnsureAdxHandle(period))return 0.0; double b[]; if(CopyBuffer(__adxHandle,2,barShift,1,b)<=0)return 0.0; return b[0]; }
+
+// Opis: Zwraca wartość ATR z cache’owanym uchwytem na dany period. Tworzy uchwyt przy zmianie period.
+// Wywołania: iATR, CopyBuffer (MQL5).
+// Globalne: _Symbol, _Period; statyczne: h, p (cache).
 double ATR_Value(int shift,int period){ static int h=-1,p=-1; if(h==-1||p!=period){h=iATR(_Symbol,_Period,period);p=period;} if(h==-1)return 0.0; double b[]; if(CopyBuffer(h,0,shift,1,b)<=0)return 0.0; return b[0]; }
 
 // Trend: 0=Down,1=Flat,2=Up  |  Vol: 0=Low,1=Normal,2=High  => 3*3 = 9
 #define NUM_REGIMES 9
 
 // ===== Najlepsze polityki/parametry per-regime (opcjonalnie z optymalizatora) =====
+// Opis: Ustawia „best” politykę i parametry dla podanego reżimu; ustawia flagę __bestReady.
+// Wywołania: (brak).
+// Globalne: __bestPolicy[], __bestATR[], __bestSW[], __bestHYB[], __bestReady.
 static bool __bestReady = false;
 static ExitPolicy    __bestPolicy[NUM_REGIMES];
 static ExitParamsATR __bestATR[NUM_REGIMES];
@@ -68,12 +93,18 @@ void ExitEngine_SetBestForRegime(int regime, ExitPolicy pol, const ExitParamsATR
 { if(regime<0||regime>=NUM_REGIMES)return; __bestPolicy[regime]=pol; __bestATR[regime]=a; __bestSW[regime]=s; __bestHYB[regime]=h; __bestReady=true; }
 
 // --- Konfiguracja wewnętrzna (fallback dla histerezy, gdyby brak CSV) ---
+// Opis: Funkcje-gettery domyślnych ustawień histerezy/DI. Służą jako fallback.
+// Wywołania: (brak).
+// Globalne: (brak).
 bool   RD_UseVolumeFusion()  { return true; }  // fusion Z-range z Z-volume
 double RD_Z_Hyst()           { return 0.05; }  // domyślna histereza Z (fallback)
 double RD_ADX_Hyst()         { return 2.0; }   // domyślna histereza ADX (fallback)
 int    RD_DI_MinGap()        { return 5; }     // domyślny DI gap (fallback)
 
 // ===== Progi reżimów ładowane LAZY z CSV =====
+// Opis: Ustawia nadpisania progów reżimów (override) i oznacza je jako załadowane.
+// Wywołania: (brak).
+// Globalne: __RD_*_Override, __RD_LoadedOnce.
 static bool   __RD_LoadedOnce      = false;
 static double __RD_ZLow_Override    = -1.0;
 static double __RD_ZHigh_Override   = -1.0;
@@ -93,7 +124,9 @@ void RD_SetOverrides(double zLow,double zHigh,double adxStrong,int diGap,double 
    __RD_LoadedOnce = true;
 }
 
-// Lazy init – wczytaj progi z CSV przy pierwszym użyciu
+// Opis: Lazy init – przy pierwszym wywołaniu ładuje progi reżimów z CSV (prefer/fallback).
+// Wywołania: DefaultRegimeThresholds, LoadRegimeThresholds, RD_SetOverrides, PrintFormat.
+// Globalne: __RD_LoadedOnce oraz nadpisania __RD_*_Override.
 void __RD_EnsureThresholds()
 {
    if(__RD_LoadedOnce) return;
@@ -110,7 +143,9 @@ void __RD_EnsureThresholds()
                t.zLow, t.zHigh, t.adxStrong, t.diGap, t.zHyst, t.adxHyst);
 }
 
-// Gettery zawsze po ensure
+// Opis: Gettery progów reżimów z uwzględnieniem lazy-init i override.
+// Wywołania: __RD_EnsureThresholds, DefaultRegimeThresholds (dla domyślnej wartości).
+// Globalne: __RD_*_Override, __RD_LoadedOnce.
 double RD_GetZLow()      { __RD_EnsureThresholds(); return (__RD_ZLow_Override    >= 0.0) ? __RD_ZLow_Override    : DefaultRegimeThresholds().zLow;  }
 double RD_GetZHigh()     { __RD_EnsureThresholds(); return (__RD_ZHigh_Override   >= 0.0) ? __RD_ZHigh_Override   : DefaultRegimeThresholds().zHigh; }
 double RD_GetADXStrong() { __RD_EnsureThresholds(); return (__RD_ADXStrong_Ovr    >= 0.0) ? __RD_ADXStrong_Ovr    : DefaultRegimeThresholds().adxStrong; }
@@ -124,6 +159,9 @@ double RD_GetADXHyst()   { __RD_EnsureThresholds(); return (__RD_ADXHyst_Overrid
 // Vol   : 0=LOW,  1=NORMAL, 2=HIGH
 // regimeKey = trend*3 + vol  (0..8)
 // ===============================
+// Opis: Kubełek wolumenowo-zasięgowy z histerezą (fusion range+volume). Stanowość dla shift==1.
+// Wywołania: RD_GetZLow/RD_GetZHigh/RD_GetZHyst/RD_UseVolumeFusion, GetStandardizedRange, GetStandardizedVolume, MathAbs.
+// Globalne: statyczny lastVolBucket (trzymany w funkcji).
 int __VolBucket_WithHysteresis(int shift)
 {
    const double zLowEnter  = RD_GetZLow();
@@ -182,6 +220,9 @@ int __VolBucket_WithHysteresis(int shift)
    }
 }
 
+// Opis: Kubełek trendu wg ADX/DI z histerezą ADX i minimalną szczeliną DI.
+// Wywołania: RD_GetADXStrong/RD_GetADXHyst/RD_GetDIGap, ADX_Value, DIPlus_Value, DIMinus_Value.
+// Globalne: (brak dodatkowych – wskaźniki przez helpery powyżej).
 int __TrendBucket(int shift)
 {
    const double strongEnter = RD_GetADXStrong();
@@ -206,6 +247,9 @@ int __TrendBucket(int shift)
    return 1;
 }
 
+// Opis: Składa reżim: trend*3 + vol na danym barze.
+// Wywołania: __TrendBucket, __VolBucket_WithHysteresis.
+// Globalne: (brak).
 int DetectRegimeKey(int barShift)
 {
    int t = __TrendBucket(barShift);
@@ -213,6 +257,9 @@ int DetectRegimeKey(int barShift)
    return t * 3 + v;
 }
 
+// Opis: Zamienia klucz reżimu (0..8) na string "UP|HIGH", "FLAT|NORMAL", itd.
+// Wywołania: (brak).
+// Globalne: (brak).
 string RegimeToString(int regimeKey)
 {
    int t = regimeKey / 3, v = regimeKey % 3;
@@ -222,6 +269,9 @@ string RegimeToString(int regimeKey)
 }
 
 // ====== Wybór polityki ======
+// Opis: Tworzy domyślną konfigurację wyjścia (policy i parametry) z inputów/globali.
+// Wywołania: (brak).
+// Globalne: Exit_ATR_K_Default, Exit_ATR_Period, Exit_Swing_N_Default, Exit_Swing_OffsetPts, inputy HYB (pola Exit_HYB_*).
 ExitConfig DefaultConfig()
 {
    ExitConfig c;
@@ -242,8 +292,15 @@ ExitConfig DefaultConfig()
    return c;
 }
 
+// Opis: Zwraca los z [0,1] (wymaga wcześniejszego MathSrand w OnInit).
+// Wywołania: MathRand.
+// Globalne: (brak).
 double __rand01() { return (double)MathRand() / 32767.0; }  // pamiętaj o MathSrand w OnInit
 
+// Opis: Wybiera politykę dla reżimu: epsilon-greedy (eksploracja/eksploatacja)
+//       – używa wyników optymalizacji (__best*) gdy dostępne, inaczej fallback.
+// Wywołania: DefaultConfig, DetectRegimeKey (pośrednio w logach), PrintFormat.
+// Globalne: __bestReady, __bestPolicy[], __bestATR[], __bestSW[], __bestHYB[], Exit_EpsilonGreedy, DebugExitOptimizer.
 ExitConfig ChooseExitForRegime(int regime)
 {
    // Eksploracja
@@ -277,6 +334,9 @@ ExitConfig ChooseExitForRegime(int regime)
 }
 
 // ====== Bindowanie polityki do biletu ======
+// Opis: Zwraca indeks powiązania dla biletu (lub -1 gdy nie ma).
+// Wywołania: (brak).
+// Globalne: __bindings[], __bindingsCount.
 struct TicketExitBinding {
    ulong ticket;
    ExitConfig cfg;
@@ -297,6 +357,9 @@ int FindBindingIndex(ulong ticket)
    return -1;
 }
 
+// Opis: Tworzy/aktualizuje powiązanie „ticket→ExitConfig”; oblicza 1R oraz entryTime.
+// Wywołania: FindBindingIndex, PositionSelectByTicket, PositionGet*, ATR_Value, PrintFormat.
+// Globalne: __bindings[], __bindingsCount, candleHistory.
 void BindExitToTicket(ulong ticket, const ExitConfig &cfg)
 {
    int idx = FindBindingIndex(ticket);
@@ -336,6 +399,9 @@ void BindExitToTicket(ulong ticket, const ExitConfig &cfg)
    if (DebugExitOptimizer) PrintFormat("[Exit] Bind ticket=%I64u ok (oneR=%.5f)", ticket, oneR);
 }
 
+// Opis: Pobiera ExitConfig dla danego biletu (jeśli zbindowany).
+// Wywołania: (brak).
+// Globalne: __bindings[], __bindingsCount.
 bool GetExitForTicket(ulong ticket, ExitConfig &out)
 {
    for (int i = 0; i < __bindingsCount; ++i) {
@@ -343,6 +409,10 @@ bool GetExitForTicket(ulong ticket, ExitConfig &out)
    }
    return false;
 }
+
+// Opis: Usuwa powiązanie biletu (oznacza jako nieużywane).
+// Wywołania: (brak).
+// Globalne: __bindings[], __bindingsCount.
 void UnbindTicket(ulong ticket)
 {
    for (int i = 0; i < __bindingsCount; ++i) {
@@ -351,6 +421,9 @@ void UnbindTicket(ulong ticket)
 }
 
 // ====== Implementacje polityk ======
+// Opis: Polityka ATR – przesuwa SL na chandelier ATR względem close[1].
+// Wywołania: ATR_Value, PositionSelectByTicket, PositionGet/PositionModify, PrintFormat.
+// Globalne: __exitTrade, candleHistory, DebugExit_ATR.
 bool ApplyExit_ATR(ulong ticket, bool isLong, const ExitParamsATR &p)
 {
    int shift = 1;
@@ -382,6 +455,9 @@ bool ApplyExit_ATR(ulong ticket, bool isLong, const ExitParamsATR &p)
    return false;
 }
 
+// Opis: Pomocnicza – najwyższe high w przedziale [fromShift, fromShift+bars).
+// Wywołania: ArraySize.
+// Globalne: candleHistory.
 double HighestHigh(int fromShift, int bars)
 {
    double hh = candleHistory[fromShift].high;
@@ -389,6 +465,10 @@ double HighestHigh(int fromShift, int bars)
       if (candleHistory[i].high > hh) hh = candleHistory[i].high;
    return hh;
 }
+
+// Opis: Pomocnicza – najniższe low w przedziale [fromShift, fromShift+bars).
+// Wywołania: ArraySize.
+// Globalne: candleHistory.
 double LowestLow(int fromShift, int bars)
 {
    double ll = candleHistory[fromShift].low;
@@ -397,6 +477,9 @@ double LowestLow(int fromShift, int bars)
    return ll;
 }
 
+// Opis: Polityka Swing – przesuwa SL pod/ponad lokalne skrajności z offsetem punktowym.
+// Wywołania: HighestHigh/LowestLow, PositionSelectByTicket, PositionGet/PositionModify, Pts, PrintFormat.
+// Globalne: __exitTrade, DebugExit_Swing.
 bool ApplyExit_Swing(ulong ticket, bool isLong, const ExitParamsSW &p)
 {
    int shift = 1;
@@ -425,6 +508,9 @@ bool ApplyExit_Swing(ulong ticket, bool isLong, const ExitParamsSW &p)
    return false;
 }
 
+// Opis: Heartbeat hybrydy – diagnostyka na bieżącej świecy (jednorazowo per bar).
+// Wywołania: FindBindingIndex, PositionSelectByTicket, PositionGet*, SymbolInfoDouble, ATR_Value, PrintFormat.
+// Globalne: __bindings[], candleHistory, DebugExit_Heartbeat.
 void LogHybridHeartbeat(ulong ticket, const ExitParamsHYB &p, double oneR, bool isLong)
 {
    if (!DebugExit_Heartbeat) return;
@@ -452,6 +538,9 @@ void LogHybridHeartbeat(ulong ticket, const ExitParamsHYB &p, double oneR, bool 
       p.beAfterR, p.tp1R, p.partialFrac, p.timeStopBars, p.timeStopMinR);
 }
 
+// Opis: Polityka Hybrid – częściowe wyjście, BE, trail po ATR, czasowy stop.
+// Wywołania: PositionSelectByTicket, PositionGet/PositionModify, SymbolInfo*, ATR_Value, PrintFormat, __exitTrade.PositionClose/Partial.
+// Globalne: __exitTrade, candleHistory, DebugExit_Hybrid/DebugExit_Heartbeat.
 bool ApplyExit_Hybrid(ulong ticket, bool isLong, const ExitParamsHYB &p)
 {
    if (!PositionSelectByTicket(ticket)) return false;
@@ -599,6 +688,10 @@ bool ApplyExit_Hybrid(ulong ticket, bool isLong, const ExitParamsHYB &p)
 }
 
 // ====== Zarządzanie otwartymi pozycjami ======
+// Opis: Iteruje po pozycjach na bieżącym symbolu; dobiera politykę wg reżimu i stosuje.
+// Wywołania: PositionsTotal, CPositionInfo.SelectByIndex, DetectRegimeKey, ChooseExitForRegime,
+//           BindExitToTicket, GetExitForTicket, ApplyExit_* (ATR/SWING/HYBRID).
+// Globalne: __exitTrade (pośrednio), __bindings[] (przez bind/get), _Symbol.
 void ManageOpenPositions()
 {
    CPositionInfo pos;
@@ -630,6 +723,9 @@ void ManageOpenPositions()
 }
 
 // ====== Helper: zbindowanie polityki do aktualnej pozycji ======
+// Opis: Dla wskazanego symbolu wybiera reżim, dobiera politykę i binduje do pozycji.
+// Wywołania: PositionSelect, PositionGetInteger, DetectRegimeKey, ChooseExitForRegime, BindExitToTicket, PrintFormat.
+// Globalne: DebugExitOptimizer.
 void BindPolicyForSymbolPosition(const string symbol)
 {
    if (!PositionSelect(symbol)) {

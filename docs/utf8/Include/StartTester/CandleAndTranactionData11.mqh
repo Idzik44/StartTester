@@ -1,19 +1,37 @@
 //+------------------------------------------------------------------+
-//| CandleAndTransactionData11.mqh                                     |
+//| CandleAndTransactionData11.mqh                                   |
 //| Przechowuje dane świec i dane transakcyjne                       |
 //+------------------------------------------------------------------+
 #property strict
 
-
 #ifndef __CANDLE_AND_TRANSACTION_DATA_MQH__
 #define __CANDLE_AND_TRANSACTION_DATA_MQH__
 
-#include <StartTester/Zmienne11.mqh>
+#include <StartTester/Zmienne11.mqh>   // numCandlesToCheck, inputRSIPeriod itp.
 
-// Historia 300 świec (od indeksu 0 = najnowsza, do 299 = najstarsza)
+// -------------------------------------------------------------------
+// OPIS: ZMIENNE / TYPY W TYM PLIKU
+// - MqlRates candleHistory[]        : bufor świec (series: 0=najnowsza). Rozmiar faktycznie
+//                                     zależy od numCandlesToCheck (uzupełniany w RefreshCandleHistory).
+// - struct OrderPositionData        : rekord danych zlecenia/pozycji (wspólny format).
+// - OrderPositionData activeOrdersAndPositions[] : tablica aktywnych zleceń/pozycji bieżącego symbolu.
+// - int rsiHandle                   : uchwyt wskaźnika RSI (INVALID_HANDLE jeśli nieutworzony).
+// - double customADX[], customPlusDI[], customMinusDI[] : bufory wyliczeń ADX/+DI/-DI.
+// -------------------------------------------------------------------
+
+// Bufor świec – rozmiar zależny od 'numCandlesToCheck' (uzupełnia RefreshCandleHistory)
 MqlRates candleHistory[];
 
-// Odświeżanie danych historycznych świec
+//------------------------------------------------------------------+
+// OPIS FUNKCJI: RefreshCandleHistory
+// Co robi:
+//   Ustawia candleHistory jako series (0=najnowsza) i kopiuje najnowsze
+//   'numCandlesToCheck' świec z bieżącego symbolu/timeframe’u.
+//   Ostrzega, gdy skopiowanych świec jest mniej niż 50.
+// Woła: ArraySetAsSeries, CopyRates, Print.
+// Używa: candleHistory[] (zapis), _Symbol, PERIOD_CURRENT, numCandlesToCheck.
+// Zwraca: void.
+//------------------------------------------------------------------+
 void RefreshCandleHistory()
 {
    ArraySetAsSeries(candleHistory, true);  // indeks 0 = najnowsza świeca (niedokończona)
@@ -30,11 +48,14 @@ void RefreshCandleHistory()
 
 
 //------------------------------------------------------------------+
-// Znajdź indeks świecy w candleHistory po dacie                    |
+// OPIS FUNKCJI: FindIndexByTime
+// Co robi:
+//   Dla czasu 't' zwraca indeks świecy, której przedział [start, start+tf)
+//   obejmuje 't' (zależnie od bieżącego _Period).
+// Woła: PeriodSeconds, ArraySize.
+// Używa: candleHistory[] (odczyt), _Period (odczyt).
+// Zwraca: indeks >=0 lub -1, gdy brak dopasowania.
 //------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Znajdź indeks świecy w candleHistory[] po czasie otwarcia       |
-//+------------------------------------------------------------------+
 int FindIndexByTime(datetime t)
 {
     int tfSec = PeriodSeconds(_Period);
@@ -52,7 +73,13 @@ int FindIndexByTime(datetime t)
 }
 
 //------------------------------------------------------------------+
-// Wyświetl porównanie indeksów dla testu synchronizacji            |
+// OPIS FUNKCJI: CommentCandleBarIndices
+// Co robi:
+//   Testowo oblicza indeks bieżącej świecy[1] przez FindIndexByTime.
+//   Sekcja Comment jest zakomentowana.
+// Woła: FindIndexByTime(...).
+// Używa: candleHistory[1].time.
+// Zwraca: void.
 //------------------------------------------------------------------+
 void CommentCandleBarIndices()
 {
@@ -69,7 +96,7 @@ void CommentCandleBarIndices()
 //+------------------------------------------------------------------+
 struct OrderPositionData {
    ulong ticket;
-   int type;           // ORDER_TYPE_*, POSITION_TYPE_*
+   int type;           // ORDER_TYPE_* (dla zleceń) lub POSITION_TYPE_* (dla pozycji)
    double price;
    double sl;
    double tp;
@@ -113,8 +140,13 @@ struct OrderPositionData {
 OrderPositionData activeOrdersAndPositions[];
 
 //+------------------------------------------------------------------+
-//| Sprawdź czy istnieje aktywne zlecenie lub pozycja dla symbolu  |
-//| i magicznego numeru (bez względu na kierunek)                   |
+// OPIS FUNKCJI: HasAnyOpenOrPendingOrder
+// Co robi:
+//   Odświeża listę i sprawdza, czy istnieje cokolwiek (pending/open)
+//   dla bieżącego symbolu i wskazanego magicNumber.
+// Woła: RefreshOrderAndPositionData().
+// Używa: activeOrdersAndPositions[] (po odświeżeniu), _Symbol.
+// Zwraca: true/false.
 //+------------------------------------------------------------------+
 bool HasAnyOpenOrPendingOrder(ulong magicNumber)
 {
@@ -130,7 +162,16 @@ bool HasAnyOpenOrPendingOrder(ulong magicNumber)
 }
 
 //+------------------------------------------------------------------+
-//| Odświeżanie listy aktywnych zleceń i pozycji                     |
+// OPIS FUNKCJI: RefreshOrderAndPositionData
+// Co robi:
+//   Czyści i ponownie wypełnia activeOrdersAndPositions[] rekordami:
+//   - Zlecenia oczekujące (ORDER_*) dla bieżącego symbolu,
+//   - Pozycje otwarte (POSITION_*) dla bieżącego symbolu.
+//   Dla zleceń openTime = ORDER_TIME_SETUP, dla pozycji openTime = POSITION_TIME.
+//   Na końcu dla każdego rekordu wywołuje DebugPrintOrderData(opd) (log zakomentowany).
+// Woła: ArrayResize, OrdersTotal/OrderGet*/OrderSelect, PositionsTotal/PositionGet*/PositionSelectByTicket.
+// Używa: _Symbol, activeOrdersAndPositions[].
+// Zwraca: void.
 //+------------------------------------------------------------------+
 void RefreshOrderAndPositionData() {
    ArrayResize(activeOrdersAndPositions, 0); // Wyczyść poprzednie dane
@@ -143,7 +184,7 @@ void RefreshOrderAndPositionData() {
          if (OrderGetString(ORDER_SYMBOL) == _Symbol) {
             OrderPositionData opd;
             opd.ticket    = ticket;
-            opd.type      = (int)OrderGetInteger(ORDER_TYPE);
+            opd.type      = (int)OrderGetInteger(ORDER_TYPE); // ENUM_ORDER_TYPE
             opd.price     = OrderGetDouble(ORDER_PRICE_OPEN);
             opd.sl        = OrderGetDouble(ORDER_SL);
             opd.tp        = OrderGetDouble(ORDER_TP);
@@ -151,7 +192,7 @@ void RefreshOrderAndPositionData() {
             opd.magic     = OrderGetInteger(ORDER_MAGIC);
             opd.isPending = true;
             opd.isOpen    = false;
-            opd.openTime  = (datetime)OrderGetInteger(ORDER_TIME_SETUP);  // ✅ Poprawka tutaj
+            opd.openTime  = (datetime)OrderGetInteger(ORDER_TIME_SETUP);  // czas ustawienia zlecenia
 
             ArrayResize(activeOrdersAndPositions, count + 1);
             activeOrdersAndPositions[count] = opd;
@@ -168,7 +209,7 @@ void RefreshOrderAndPositionData() {
          if (PositionGetString(POSITION_SYMBOL) == _Symbol) {
             OrderPositionData opd;
             opd.ticket    = ticket;
-            opd.type      = (int)PositionGetInteger(POSITION_TYPE);
+            opd.type      = (int)PositionGetInteger(POSITION_TYPE); // ENUM_POSITION_TYPE
             opd.price     = PositionGetDouble(POSITION_PRICE_OPEN);
             opd.sl        = PositionGetDouble(POSITION_SL);
             opd.tp        = PositionGetDouble(POSITION_TP);
@@ -176,7 +217,7 @@ void RefreshOrderAndPositionData() {
             opd.magic     = PositionGetInteger(POSITION_MAGIC);
             opd.isPending = false;
             opd.isOpen    = true;
-            opd.openTime  = (datetime)PositionGetInteger(POSITION_TIME);  // ✅ To zostaje
+            opd.openTime  = (datetime)PositionGetInteger(POSITION_TIME);  // czas otwarcia pozycji
 
             ArrayResize(activeOrdersAndPositions, count + 1);
             activeOrdersAndPositions[count] = opd;
@@ -187,30 +228,44 @@ void RefreshOrderAndPositionData() {
    }
 }
 
-
+//+------------------------------------------------------------------+
+// OPIS FUNKCJI: DebugPrintOrderData
+// Co robi:
+//   Buduje (i po odkomentowaniu PrintFormat wypisuje) sformatowany log rekordu.
+//   Poprawne mapowanie enumów: dla pending → ENUM_ORDER_TYPE, dla open → ENUM_POSITION_TYPE.
+// Woła: EnumToString, TimeToString, (opcjonalnie) PrintFormat.
+// Używa: tylko parametrów funkcji.
+// Zwraca: void.
+//+------------------------------------------------------------------+
 void DebugPrintOrderData(const OrderPositionData &opd) {
    string typeStr = opd.isPending ? "Pending" : (opd.isOpen ? "Open" : "Unknown");
-   string typeName = EnumToString((ENUM_ORDER_TYPE)opd.type);
+   string typeName;
+
+   if (opd.isPending)
+      typeName = EnumToString((ENUM_ORDER_TYPE)opd.type);
+   else if (opd.isOpen)
+      typeName = EnumToString((ENUM_POSITION_TYPE)opd.type);
+   else
+      typeName = "Unknown";
+
    string timeStr = TimeToString(opd.openTime, TIME_DATE | TIME_MINUTES);
 
- /*  PrintFormat("Ticket: %I64u | Type: %s (%s) | Symbol: %s | Price: %.5f | SL: %.5f | TP: %.5f | Magic: %d | Time: %s",
-               opd.ticket,
-               typeStr,
-               typeName,
-               opd.symbol,
-               opd.price,
-               opd.sl,
-               opd.tp,
-               opd.magic,
-               timeStr);          */
+ /*  PrintFormat("Ticket: %I64u | Kind: %s | Type: %s | Symbol: %s | Price: %.5f | SL: %.5f | TP: %.5f | Magic: %d | Time: %s",
+               opd.ticket, typeStr, typeName, opd.symbol, opd.price, opd.sl, opd.tp, opd.magic, timeStr); */
 }
 
 //+------------------------------------------------------------------+
-//| RSI                                                              |
+//| RSI – inicjalizacja i zwalnianie uchwytu                         |
 //+------------------------------------------------------------------+
-
 int rsiHandle = INVALID_HANDLE;
 
+//------------------------------------------------------------------+
+// OPIS FUNKCJI: InitRSI
+// Co robi: Jeśli inputRSIPeriod > 0 i uchwyt nie istnieje, tworzy RSI dla bieżącego symbolu/timeframe’u.
+// Woła: iRSI, Print.
+// Używa: inputRSIPeriod, rsiHandle, _Symbol, PERIOD_CURRENT.
+// Zwraca: void.
+//------------------------------------------------------------------+
 void InitRSI()
 {
     if (inputRSIPeriod == 0)
@@ -224,8 +279,13 @@ void InitRSI()
         Print("[ERROR] Failed to create RSI handle");
 }
 
-
-
+//------------------------------------------------------------------+
+// OPIS FUNKCJI: ReleaseRSI
+// Co robi: Zwalnia uchwyt RSI (jeśli istnieje) i resetuje do INVALID_HANDLE.
+// Woła: IndicatorRelease.
+// Używa: rsiHandle.
+// Zwraca: void.
+//------------------------------------------------------------------+
 void ReleaseRSI()
 {
     if (rsiHandle != INVALID_HANDLE)
@@ -234,59 +294,24 @@ void ReleaseRSI()
         rsiHandle = INVALID_HANDLE;
     }
 }
+
 //+--------------------------------------------------------------+
-//                   EMA i SMA                                   |
+//| ADX – bufory i obliczenia                                   |
 //+--------------------------------------------------------------+
-/*
-int handleEMA;
-int handleSMA;
-
-double emaBuffer[];
-double smaBuffer[];
-
-// Inicjalizacja
-bool InitMovingAverages(string symbol, ENUM_TIMEFRAMES timeframe) {
-   handleEMA = iMA(symbol, timeframe, inputMaValue, 0, MODE_EMA, PRICE_CLOSE);
-   handleSMA = iMA(symbol, timeframe, inputMaValue, 0, MODE_SMA, PRICE_CLOSE);
-   return (handleEMA != INVALID_HANDLE && handleSMA != INVALID_HANDLE);
-}
-
-// Aktualizacja danych
-bool UpdateMovingAverages() {
-   if(!CopyBuffer(handleEMA, 0, 0, 3, emaBuffer) || 
-      !CopyBuffer(handleSMA, 0, 0, 3, smaBuffer)) {
-      Print("Failed to update moving averages");
-      return false;
-   }
-   return true;
-}
-
-//+------------------------------------------------------------------+
-//| Sprawdzenie położenia względem EMA i SMA                                |
-//+------------------------------------------------------------------+
-bool PassesMaCloseFilter(bool isBuy)
-{
-   if (ArraySize(emaBuffer) < 2 || ArraySize(smaBuffer) < 2 || ArraySize(candleHistory) < 2)
-      return false;
-
-   double close = candleHistory[1].close;
-   double ema   = emaBuffer[1];
-   double sma   = smaBuffer[1];
-
-   if (isBuy)
-      return (close > ema && close > sma);
-   else
-      return (close < ema && close < sma);
-}
-*/
-//+--------------------------------------------------------------+
-//                         ADX                                   |
-//+--------------------------------------------------------------+
-
 double customADX[];
 double customPlusDI[];
 double customMinusDI[];
 
+//------------------------------------------------------------------+
+// OPIS FUNKCJI: ComputeCustomADX
+// Co robi:
+//   Liczy customPlusDI/customMinusDI oraz customADX dla zadanego 'period'.
+//   Najpierw oblicza DI i zapisuje do buforów, następnie liczy średni DX
+//   (ADX) po oknie – korzystając już z aktualnego elementu.
+// Woła: ArraySize/Resize/Initialize, MathAbs, MathMax.
+// Używa: candleHistory[] (odczyt), custom* bufory (zapis).
+// Zwraca: void.
+//------------------------------------------------------------------+
 void ComputeCustomADX(int period = 14)
 {
    int total = ArraySize(candleHistory);
@@ -300,23 +325,19 @@ void ComputeCustomADX(int period = 14)
    for (int i = total - period - 1; i >= 1; i--)
    {
       double prevHigh = candleHistory[i + 1].high;
-      double prevLow = candleHistory[i + 1].low;
-      double prevClose = candleHistory[i + 1].close;
+      double prevLow  = candleHistory[i + 1].low;
+      double prevClose= candleHistory[i + 1].close;
 
       double high = candleHistory[i].high;
-      double low = candleHistory[i].low;
+      double low  = candleHistory[i].low;
 
-      double upMove = high - prevHigh;
+      double upMove   = high - prevHigh;
       double downMove = prevLow - low;
 
-      double plusDM = (upMove > downMove && upMove > 0) ? upMove : 0;
+      double plusDM  = (upMove > downMove && upMove > 0) ? upMove : 0;
       double minusDM = (downMove > upMove && downMove > 0) ? downMove : 0;
 
-      double tr1 = high - low;
-      double tr2 = MathAbs(high - prevClose);
-      double tr3 = MathAbs(low - prevClose);
-      double trueRange = MathMax(tr1, MathMax(tr2, tr3));
-
+      // Sumowania DM/TR po 'period'
       double sumTR = 0, sumPlusDM = 0, sumMinusDM = 0;
       for (int j = 0; j < period; j++)
       {
@@ -329,9 +350,9 @@ void ComputeCustomADX(int period = 14)
          double h = candleHistory[idx].high;
          double l = candleHistory[idx].low;
 
-         double up = h - prevH;
+         double up   = h - prevH;
          double down = prevL - l;
-         sumPlusDM += (up > down && up > 0) ? up : 0;
+         sumPlusDM  += (up > down && up > 0) ? up : 0;
          sumMinusDM += (down > up && down > 0) ? down : 0;
 
          double trA = h - l;
@@ -342,47 +363,61 @@ void ComputeCustomADX(int period = 14)
 
       if (sumTR == 0) continue;
 
-      double plusDI = 100.0 * sumPlusDM / sumTR;
+      double plusDI  = 100.0 * sumPlusDM  / sumTR;
       double minusDI = 100.0 * sumMinusDM / sumTR;
-      double dx = 100.0 * MathAbs(plusDI - minusDI) / (plusDI + minusDI);
 
-      double adx = 0;
+      // Zapisz DI dla bieżącego i
+      customPlusDI[i]  = plusDI;
+      customMinusDI[i] = minusDI;
+
+      // Policz średni DX (ADX) po oknie [i .. i+period)
+      double adxSum = 0.0;
+      int    adxCnt = 0;
       for (int j = 0; j < period && (i + j) < total; j++)
       {
          int idx = i + j;
          double pDI = customPlusDI[idx];
          double mDI = customMinusDI[idx];
          if ((pDI + mDI) == 0) continue;
-         adx += 100.0 * MathAbs(pDI - mDI) / (pDI + mDI);
+         adxSum += 100.0 * MathAbs(pDI - mDI) / (pDI + mDI);
+         adxCnt++;
       }
-      adx /= period;
+      double adx = (adxCnt > 0) ? (adxSum / adxCnt) : 0.0;
 
       customADX[i] = adx;
-      customPlusDI[i] = plusDI;
-      customMinusDI[i] = minusDI;
    }
 
 //   Print("✅ Własne ADX obliczone.");
 }
 
+//------------------------------------------------------------------+
+// OPIS FUNKCJI: GetCustomADXAt
+// Co robi: Zwraca customADX[i] lub -1, jeśli i poza zakresem.
+// Zwraca: double.
+//------------------------------------------------------------------+
 double GetCustomADXAt(int i) {
    if (i < 0 || i >= ArraySize(customADX)) return -1;
    return customADX[i];
 }
 
+//------------------------------------------------------------------+
+// OPIS FUNKCJI: GetCustomPlusDIAt
+// Co robi: Zwraca customPlusDI[i] lub -1, jeśli i poza zakresem.
+// Zwraca: double.
+//------------------------------------------------------------------+
 double GetCustomPlusDIAt(int i) {
    if (i < 0 || i >= ArraySize(customPlusDI)) return -1;
    return customPlusDI[i];
 }
 
+//------------------------------------------------------------------+
+// OPIS FUNKCJI: GetCustomMinusDIAt
+// Co robi: Zwraca customMinusDI[i] lub -1, jeśli i poza zakresem.
+// Zwraca: double.
+//------------------------------------------------------------------+
 double GetCustomMinusDIAt(int i) {
    if (i < 0 || i >= ArraySize(customMinusDI)) return -1;
    return customMinusDI[i];
 }
 
-
 #endif
-
-
-
-

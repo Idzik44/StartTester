@@ -54,14 +54,20 @@ struct ExitBinding {
 };
 ExitBinding g_exitBindings[];
 
-// znajdź istniejące wiązanie
+// Opis: Szuka istniejącego wiązania ticket→ExitParams/Regime.
+// Wywołania: (brak).
+// Globalne: g_exitBindings (tablica).
 int FindBinding(ulong ticket) {
    for(int i=ArraySize(g_exitBindings)-1;i>=0;--i)
       if(g_exitBindings[i].ticket==ticket) return i;
    return -1;
 }
 
-// utwórz wiązanie jeśli brak – policz reżim i wybierz policy
+// Opis: Zapewnia (tworzy/aktualizuje) wiązanie dla pozycji. Klasyfikuje reżim, ładuje najlepsze parametry,
+//       wyłącza partial jeśli wolumen nie pozwala.
+// Wywołania: FindBinding, GetRegimeFeatures, ClassifyRegime, LoadBestExitForRegime, CanPartialByLot,
+//            ArrayResize, CopyExitParams.
+// Globalne: g_exitBindings[], candleHistory (pośrednio przez klasyfikację reżimu).
 void EnsureBindingForPosition(ulong ticket, bool isBuy)
 {
    int idx = FindBinding(ticket);
@@ -102,18 +108,28 @@ CTrade tradeExit;
 
 // --- Jednorazowość partial TP per ticket ---
 ulong g_partialDoneTickets[];
+
+// Opis: Sprawdza, czy dla ticket wykonano już częściowe wyjście (jednorazowość).
+// Wywołania: (brak).
+// Globalne: g_partialDoneTickets.
 bool PartialAlreadyDone(ulong ticket) {
    for (int i = ArraySize(g_partialDoneTickets) - 1; i >= 0; --i)
       if (g_partialDoneTickets[i] == ticket) return true;
    return false;
 }
+
+// Opis: Oznacza ticket jako obsłużony (partial TP wykonany).
+// Wywołania: ArrayResize.
+// Globalne: g_partialDoneTickets.
 void MarkPartialDone(ulong ticket) {
    int n = ArraySize(g_partialDoneTickets);
    ArrayResize(g_partialDoneTickets, n + 1);
    g_partialDoneTickets[n] = ticket;
 }
 
-
+// Opis: Prosty ATR liczony lokalnie z candleHistory (średnia TR z ostatnich 'period' barów od 'index').
+// Wywołania: ArraySize, MathAbs, MathMax.
+// Globalne: candleHistory (MqlRates[]).
 double GetATR(int period, int index=1)
 {
    // prosta wersja ATR na bazie candleHistory (True Range 1-barowy * EMA pseudo)
@@ -134,6 +150,9 @@ double GetATR(int period, int index=1)
    return trSum/period;
 }
 
+// Opis: Wyszukuje pozycję po magicu i symbolu; zwraca podstawowe parametry pozycji.
+// Wywołania: PositionsTotal, PositionGetTicket, PositionSelectByTicket, PositionGetString/Integer/Double.
+// Globalne: (brak).
 bool GetPositionByMagic(ulong magic, string symbol, ulong &ticket, bool &isBuy,
                         double &entry, double &sl, double &tp, datetime &timeOpen)
 {
@@ -158,6 +177,9 @@ bool GetPositionByMagic(ulong magic, string symbol, ulong &ticket, bool &isBuy,
    return false;
 }
 
+// Opis: Zwraca liczbę zamkniętych świec od chwili 't' (licząc po candleHistory).
+// Wywołania: ArraySize.
+// Globalne: candleHistory.
 int BarsSince(datetime t)
 {
    // policz ile świec zamknięto od czasu t
@@ -166,6 +188,9 @@ int BarsSince(datetime t)
    return 0;
 }
 
+// Opis: Warunkowe przesunięcie SL do BE wg konfiguracji globalnej (UseBreakeven, BE_Trigger_R, BE_OffsetPoints).
+// Wywołania: SymbolInfoDouble, PositionGetDouble, tradeExit.PositionModify, MathAbs.
+// Globalne: UseBreakeven, BE_Trigger_R, BE_OffsetPoints, _Symbol, tradeExit.
 void MaybeMoveToBreakeven(ulong ticket, bool isBuy, double entry, double &sl)
 {
    if(!UseBreakeven) return;
@@ -187,6 +212,11 @@ void MaybeMoveToBreakeven(ulong ticket, bool isBuy, double entry, double &sl)
    }
 }
 
+// Opis: Warunkowe częściowe wyjście wg konfiguracji globalnej (UsePartialTP, PartialTP_R, PartialTP_Percent).
+//       Jednorazowe na ticket (PartialAlreadyDone/MarkPartialDone).
+// Wywołania: PartialAlreadyDone, SymbolInfoDouble, PositionGetDouble, MathAbs/MathFloor/MathMax,
+//            tradeExit.PositionClosePartial, MarkPartialDone.
+// Globalne: UsePartialTP, PartialTP_R, PartialTP_Percent, _Symbol, tradeExit.
 void MaybePartialTP(ulong ticket, bool isBuy, double entry, double sl)
 {
    if(!UsePartialTP) return;
@@ -214,7 +244,10 @@ void MaybePartialTP(ulong ticket, bool isBuy, double entry, double sl)
    }
 }
 
-
+// Opis: Trailing stop wg ustawionego trybu: ATR / CANDLE / STEP (globalne UseTrailing, ATR_Period, ATR_Multiplier,
+//       TrailStepEveryPoints, TrailStepLockPoints). Modyfikuje SL, jeśli kandydat poprawia pozycję.
+// Wywołania: SymbolInfoDouble, PositionGetDouble, GetATR, MathFloor, tradeExit.PositionModify.
+// Globalne: UseTrailing, ATR_Period, ATR_Multiplier, TrailStepEveryPoints, TrailStepLockPoints, _Symbol, candleHistory, tradeExit.
 void MaybeTrail(ulong ticket, bool isBuy, double &sl)
 {
    if(UseTrailing==TRAIL_NONE) return;
@@ -255,6 +288,9 @@ void MaybeTrail(ulong ticket, bool isBuy, double &sl)
    }
 }
 
+// Opis: „Twarde” wyjście na podstawie przeciwnych wskazań DI/ADX (globalne progi ExitAdxMin/ExitDiMin/ExitDiDiff).
+// Wywołania: GetCustomADXAt, GetCustomPlusDIAt, GetCustomMinusDIAt, MathAbs.
+// Globalne: UseOppositeDIExit, ExitAdxMin, ExitDiMin, ExitDiDiff.
 bool MaybeOppositeDIExit(bool isBuy)
 {
    if(!UseOppositeDIExit) return false;
@@ -273,6 +309,9 @@ bool MaybeOppositeDIExit(bool isBuy)
    return false;
 }
 
+// Opis: Sprawdza limit czasu w pozycji (time-stop) według globali UseTimeStop/MaxBarsInTrade.
+// Wywołania: BarsSince.
+// Globalne: UseTimeStop, MaxBarsInTrade.
 bool MaybeTimeStop(datetime openTime)
 {
    if(!UseTimeStop) return false;
@@ -280,6 +319,9 @@ bool MaybeTimeStop(datetime openTime)
    return (bars >= MaxBarsInTrade);
 }
 
+// Opis: Hak pod „zamknij przy zmianie sesji” (na razie zawsze false; sterowane UseSessionCloseExit).
+// Wywołania: (brak).
+// Globalne: UseSessionCloseExit.
 bool MaybeSessionClose()
 {
    if(!UseSessionCloseExit) return false;
@@ -289,6 +331,12 @@ bool MaybeSessionClose()
 }
 
 // ---- PUBLIC API ----
+// Opis: Główna pętla zarządzania wyjściem dla wszystkich pozycji z danym magic number.
+//       Kolejność: BE → Partial → Trailing → wyjścia twarde (DI/time-stop).
+// Wywołania: PositionsTotal, PositionGetTicket, PositionSelectByTicket, PositionGet*, EnsureBindingForPosition,
+//            FindBinding, CopyExitParams, MaybeMoveToBreakevenWithParams, MaybePartialTPWithParams,
+//            MaybeTrailWithParams, MaybeOppositeDIExitWithParams, BarsSince, tradeExit.PositionClose.
+// Globalne: UseExitManager, _Symbol, tradeExit, g_exitBindings[].
 void ManageOpenPositions(ulong magic)
 {
    if(!UseExitManager) return;
@@ -328,7 +376,9 @@ void ManageOpenPositions(ulong magic)
    }
 }
 
-
+// Opis: Wersja BE na podstawie parametrów ExitParams (zamiast globali).
+// Wywołania: SymbolInfoDouble, PositionGetDouble, tradeExit.PositionModify, MathAbs.
+// Globalne: _Symbol, tradeExit.
 void MaybeMoveToBreakevenWithParams(ulong ticket, bool isBuy, double entry, double &sl, const ExitParams &p) {
    if(!p.useBE) return;
 
@@ -348,7 +398,9 @@ void MaybeMoveToBreakevenWithParams(ulong ticket, bool isBuy, double entry, doub
    }
 }
 
-
+// Opis: Wersja partial TP na podstawie ExitParams (zamiast globali).
+// Wywołania: SymbolInfoDouble, PositionGetDouble, MathAbs/MathFloor/MathMax, tradeExit.PositionClosePartial.
+// Globalne: _Symbol, tradeExit.
 void MaybePartialTPWithParams(ulong ticket, bool isBuy, double entry, double sl, const ExitParams &p) {
    if(!p.usePartial) return;
    double price = isBuy ? SymbolInfoDouble(_Symbol,SYMBOL_BID) : SymbolInfoDouble(_Symbol,SYMBOL_ASK);
@@ -366,6 +418,10 @@ void MaybePartialTPWithParams(ulong ticket, bool isBuy, double entry, double sl,
    }
 }
 
+// Opis: Wersja trailing stop na podstawie ExitParams (TRAIL_ATR / TRAIL_CANDLE / TRAIL_STEP).
+//       Używa RD_ATR(...) zewnętrznie (Regime/Range analyzer) dla trybu ATR.
+// Wywołania: RD_ATR, SymbolInfoDouble, PositionGetDouble, MathFloor, ArraySize, tradeExit.PositionModify.
+// Globalne: _Symbol, candleHistory, tradeExit.
 void MaybeTrailWithParams(ulong ticket, bool isBuy, double &sl, const ExitParams &p)
 {
    if(p.trail==TRAIL_NONE) return;
@@ -418,7 +474,9 @@ void MaybeTrailWithParams(ulong ticket, bool isBuy, double &sl, const ExitParams
    }
 }
 
-
+// Opis: „Twarde” wyjście DI/ADX na bazie ExitParams (progi z pól p).
+// Wywołania: GetCustomADXAt, GetCustomPlusDIAt, GetCustomMinusDIAt, MathAbs.
+// Globalne: (brak — korzysta wyłącznie z parametrów wejściowych).
 bool MaybeOppositeDIExitWithParams(bool isBuy, const ExitParams &p) {
    if(!p.useDIExit) return false;
    int i=1;

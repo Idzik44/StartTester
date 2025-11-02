@@ -31,12 +31,30 @@
 #define RV_FL_HIGH     clrDimGray
 
 // --------- HELPERS -----------------------------------------------
+
+/*
+  Funkcja: RV_ObjTxtName
+  Opis:    Buduje unikalną nazwę obiektu tekstowego (etykiety) dla danej świecy.
+  Wywołuje: StringFormat (wbud.), używa _Symbol, _Period.
+  Globalne/stałe: RV_PREFIX (prefix nazw), _Symbol, _Period.
+  Wejście:  t (datetime świecy).
+  Wyjście:  string – gotowa nazwa obiektu.
+*/
 string RV_ObjTxtName(datetime t)
 {
    // unikalnie: symbol + TF + czas
    return StringFormat("%s_TXT_%s_%d_%I64d", RV_PREFIX, _Symbol, (int)_Period, (long)t);
 }
 
+/*
+  Funkcja: RV_ColorForRegime
+  Opis:    Mapuje kod reżimu (0..8) na kolor – komponent trendu (DOWN/FLAT/UP)
+           i zmienności (LOW/NORMAL/HIGH) wybiera konkretny odcień.
+  Wywołuje: brak.
+  Globalne/stałe: stałe kolorów RV_UP_*, RV_DN_*, RV_FL_*.
+  Wejście:  regime (int).
+  Wyjście:  color – kolor etykiety.
+*/
 color RV_ColorForRegime(int regime)
 {
    int t = regime / 3; // 0=DOWN,1=FLAT,2=UP
@@ -56,6 +74,15 @@ color RV_ColorForRegime(int regime)
    }
 }
 
+/*
+  Funkcja: RV_KeyToString
+  Opis:    Zamienia kod reżimu (0..8) na czytelną etykietę "UP|LOW/NORMAL/HIGH",
+           "DOWN|..." lub "FLAT|...".
+  Wywołuje: brak.
+  Globalne/stałe: brak (logika własna).
+  Wejście:  regime (int).
+  Wyjście:  string – tekst etykiety.
+*/
 string RV_KeyToString(int regime)
 {
    int t = regime / 3;
@@ -66,6 +93,15 @@ string RV_KeyToString(int regime)
 }
 
 // --------- API: usuń wszystkie obiekty wizualizera ----------------
+
+/*
+  Funkcja: RegimeViz_Clear
+  Opis:    Usuwa wszystkie obiekty graficzne należące do wizualizera (prefiks RV_).
+  Wywołuje: ObjectsTotal, ObjectName, StringFind, ObjectDelete (wbudowane).
+  Globalne/stałe: RV_PREFIX; działa na bieżącym wykresie (chart=0).
+  Wejście:  brak.
+  Wyjście:  brak (procedura).
+*/
 void RegimeViz_Clear()
 {
    const int total = ObjectsTotal(0, 0, -1);
@@ -78,6 +114,23 @@ void RegimeViz_Clear()
 }
 
 // --------- API: narysuj overlay dla ostatnich N świec -------------
+
+/*
+  Funkcja: RegimeViz_DrawOverlay
+  Opis:    Rysuje etykiety reżimu nad świecami (ostatnie N barów). Treść etykiety
+           pochodzi z RV_KeyToString(), kolor z RV_ColorForRegime(). Pozycja
+           liczona jest jako środek czasu świecy i wysokość high + odstęp w pipsach.
+  Wywołuje: DetectRegimeKey(i) (zewn.), RV_ObjTxtName, RV_KeyToString,
+            RV_ColorForRegime, SymbolInfoDouble, PeriodSeconds, ObjectFind,
+            ObjectCreate, ObjectSetInteger, ObjectSetString, ObjectMove (wbud.).
+  Globalne/stałe: candleHistory[] (z CandleAndTranactionData11.mqh),
+                  RV_MAX_BARS, RV_FONT_SIZE, RV_PAD_PIPS, RV_PREFIX,
+                  _Symbol, _Period.
+  Wejście:  lookbackBars (ile świec), showText (czy rysować etykiety).
+  Wyjście:  brak (procedura).
+  Uwagi:    Zakłada standard „1 pip = 10 punktów” dla 5-cyfrowych kwotowań
+            (przy innych kwotowaniach odstęp jest umowny – to tylko overlay).
+*/
 void RegimeViz_DrawOverlay(int lookbackBars = RV_MAX_BARS, bool showText = true)
 {
    int total = ArraySize(candleHistory);

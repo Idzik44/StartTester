@@ -13,7 +13,43 @@
 #include <StartTester/BuySellFunction11.mqh>
 #include <StartTester/ExitEngine.mqh>   // [EXITENGINE] meta-kontroler wyjść
 
-// Główna funkcja do składania zleceń 
+/*
+  Funkcja: ExecuteImpulseTrade
+  Cel:
+    Składa zlecenie (preferencyjnie pending BuyStop/SellStop z wygaśnięciem na jedną świecę,
+    a w razie niepowodzenia – zlecenie rynkowe), dla sygnału „impulsu”.
+    Opcjonalnie po udanym zleceniu wiąże politykę wyjścia w ExitEngine.
+
+  Wywołuje:
+    - RefreshOrderAndPositionData()                [BuySellFunction11.mqh / moduł danych zleceń]
+    - HasAnyOpenOrPendingOrder(ulong magicNumber)  [BuySellFunction11.mqh / anty-duplikacja]
+    - CalculateSLAndTP(...)                        [Position_Size11.mqh]
+    - CalculateLotSize(...)                        [Position_Size11.mqh]
+    - CTrade: SetExpertMagicNumber, BuyStop, SellStop, Buy, Sell  [Trade.mqh]
+    - SymbolInfoDouble(...), PeriodSeconds(_Period), TimeCurrent(), TimeToString(...)
+    - BindPolicyForSymbolPosition(_Symbol)         [ExitEngine.mqh] (gdy Enable_BindExitEngine)
+
+  Używa globalnych/inputów:
+    - DebugOrders, Enable_LiveTrading, Enable_BindExitEngine
+    - inputSLMultiplier, inputSLPoints, inputTPMultiplier
+    - inputFixedLot, inputCalculationMode, inputAccountRiskCapital, inputRiskPercentage
+    - _Symbol, _Period, _Digits
+
+  Parametry:
+    - isBuy: kierunek (true=BUY, false=SELL)
+    - adjustedPrice: cena aktywacji pendinga (po marginesie wykonania)
+    - candleTime: czas świecy sygnałowej (log pomocniczy)
+    - UseSLMethod: metoda liczenia SL/TP (delegowane do CalculateSLAndTP)
+    - magicNumber: magic number
+
+  Efekty uboczne:
+    - Wystawia zlecenie pending lub rynkowe; wiąże politykę wyjścia (opcjonalnie).
+    - Logi diagnostyczne.
+
+  Uwagi:
+    - DRY-RUN: gdy Enable_LiveTrading==false — tylko loguje parametry.
+    - Expiry pendinga = jedna świeca bieżącego TF (PeriodSeconds(_Period) z fallbackiem).
+*/
 void ExecuteImpulseTrade(bool isBuy,
                          double adjustedPrice,
                          datetime candleTime,
@@ -31,8 +67,10 @@ void ExecuteImpulseTrade(bool isBuy,
         return;
     }
 
-    // ustaw czas wygaśnięcia pendinga = jedna świeca bieżącego TF
-    datetime expiryTime = TimeCurrent() + _Period;
+    // ustaw czas wygaśnięcia pendinga = jedna świeca bieżącego TF (spójnie z resztą projektu)
+    int tfSec = PeriodSeconds(_Period);
+    if (tfSec <= 0) tfSec = 60; // bezpieczny fallback
+    datetime expiryTime = TimeCurrent() + tfSec;
 
     // wylicz SL/TP
     double stopLossPrice = 0.0, takeProfitPrice = 0.0;
@@ -52,7 +90,7 @@ void ExecuteImpulseTrade(bool isBuy,
         return;
     }
 
-    // ======= TRYB DRY-RUN (Etap 3A): nie składaj zleceń, tylko zaloguj co by się stało =======
+    // ======= TRYB DRY-RUN: nie składaj zleceń, tylko zaloguj co by się stało =======
     if (!Enable_LiveTrading)
     {
         if (DebugOrders)
@@ -66,12 +104,11 @@ void ExecuteImpulseTrade(bool isBuy,
                         TimeToString(expiryTime, TIME_DATE|TIME_SECONDS),
                         magicNumber);
         }
-        // W DRY-RUN nie wiążemy polityki wyjścia i nie składamy zleceń.
         return;
     }
-    // ==========================================================================================
+    // =================================================================================
 
-    // REAL TRADING (Etap 3B+)
+    // REAL TRADING
     trade.SetExpertMagicNumber(magicNumber);
 
     bool success = false;

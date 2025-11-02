@@ -38,12 +38,24 @@ input double RT_Override_adxHyst    = 3.0;
 // ---------------------------
 // Pomocnicze
 // ---------------------------
+
+/*
+ Funkcja: __RT_CommonFilesPath
+ Opis:    Zwraca pełną ścieżkę do pliku w katalogu COMMON\Files terminala.
+ Wywołuje: TerminalInfoString(), konkatenacja stringów.
+ Używa globalnych: brak (wykorzystuje parametr fname i stałą ścieżkę COMMON).
+*/
 string __RT_CommonFilesPath(const string fname)
 {
    return TerminalInfoString(TERMINAL_COMMONDATA_PATH) + "\\Files\\" + fname;
 }
 
-// Zwraca zestaw sensownych domyślnych progów.
+/*
+ Funkcja: DefaultRegimeThresholds
+ Opis:    Tworzy i zwraca domyślny zestaw progów reżimów (bez odczytu z pliku).
+ Wywołuje: brak (czysta inicjalizacja struktury).
+ Używa globalnych: brak.
+*/
 RegimeThresholds DefaultRegimeThresholds()
 {
    RegimeThresholds t;
@@ -56,7 +68,13 @@ RegimeThresholds DefaultRegimeThresholds()
    return t;
 }
 
-// Nadpisuje t* wartościami z inputów, jeśli RT_EnableOverrides==true
+/*
+ Funkcja: ApplyRegimeThresholdsOverrides
+ Opis:    Opcjonalnie nadpisuje pola struktury progów wartościami z inputów,
+          jeśli RT_EnableOverrides==true. Służy jako globalny override.
+ Wywołuje: PrintFormat() (log informacyjny przy aktywnych override).
+ Używa globalnych (input): RT_EnableOverrides, RT_Override_*.
+*/
 void ApplyRegimeThresholdsOverrides(RegimeThresholds &t)
 {
    if(!RT_EnableOverrides) return;
@@ -75,6 +93,15 @@ void ApplyRegimeThresholdsOverrides(RegimeThresholds &t)
 // ---------------------------
 // Uwaga: domyślna wartość parametru MUSI być literałem, więc używamy "" i
 // wewnątrz robimy fallback do RT_FileNameCommonCSV.
+
+/*
+ Funkcja: SaveRegimeThresholds
+ Opis:    Zapisuje progi reżimów do pliku CSV (separator ';') w COMMON\Files.
+ Wywołuje: FileOpen(), FileWrite(), FileClose(), __RT_CommonFilesPath(), Print().
+ Używa globalnych (input): RT_FileNameCommonCSV (gdy fileNameCommonCSV == "").
+ Wejście:  t - struktura progów; fileNameCommonCSV - opcjonalna nazwa pliku.
+ Wyjście:  true/false w zależności od powodzenia zapisu.
+*/
 bool SaveRegimeThresholds(const RegimeThresholds &t, const string fileNameCommonCSV = "")
 {
    const string fname = (fileNameCommonCSV == "" ? RT_FileNameCommonCSV : fileNameCommonCSV);
@@ -104,6 +131,18 @@ bool SaveRegimeThresholds(const RegimeThresholds &t, const string fileNameCommon
 // ---------------------------
 // ODCZYT z CSV (nagłówek + 1 linia) — próba kilku separatorów
 // ---------------------------
+
+/*
+ Funkcja: __RT_TryLoadCSV
+ Opis:    Próbny odczyt pliku CSV z COMMON\Files przy wskazanym separatorze
+          (delim). Obsługuje nagłówek i jeden wiersz z wartościami.
+ Wywołuje: FileOpen(), FileReadString(), FileIsEnding(), FileClose(),
+           StringFind(), StringCompare(), StringToDouble(), StringToInteger().
+ Używa globalnych: brak bezpośrednich; korzysta z parametrów fname i delim.
+ Wejście:  fname - nazwa pliku; delim - separator; out - referencja na wynik.
+ Wyjście:  true/false; w przypadku powodzenia wypełnia out.
+ Uwagi:    Zawiera wstępną walidację zakresów pól (progi sensowności).
+*/
 bool __RT_TryLoadCSV(const string fname, uchar delim, RegimeThresholds &out)
 {
    int h = FileOpen(fname, FILE_READ|FILE_COMMON|FILE_CSV, delim);
@@ -160,9 +199,25 @@ bool __RT_TryLoadCSV(const string fname, uchar delim, RegimeThresholds &out)
    return true;
 }
 
-// --- Robustny TXT loader z autodetekcją separatora i nagłówka ---
+/*
+ Funkcja: __rt_to_double
+ Opis:    Zamienia ewentualny przecinek na kropkę i parsuje double.
+ Wywołuje: StringReplace(), StringToDouble().
+ Używa globalnych: brak.
+*/
 double __rt_to_double(string s) { StringReplace(s, ",", "."); return StringToDouble(s); }
 
+/*
+ Funkcja: __RT_TryLoadTXT
+ Opis:    Roboczy loader „TXT” z autodetekcją separatora (;, , lub TAB)
+          i obsługą nagłówka. Działa na pliku COMMON\Files.
+ Wywołuje: FileOpen(), FileReadString(), FileIsEnding(), FileClose(),
+           StringFind(), StringSplit(), __rt_to_double().
+ Używa globalnych: brak.
+ Wejście: fname - nazwa pliku; out - referencja na wynik.
+ Wyjście: true/false; w przypadku powodzenia wypełnia out.
+ Uwagi:   Wykonuje walidację zakresów pól podobnie jak CSV loader.
+*/
 bool __RT_TryLoadTXT(const string fname, RegimeThresholds &out)
 {
    int h = FileOpen(fname, FILE_READ|FILE_COMMON|FILE_TXT|FILE_ANSI);
@@ -219,6 +274,19 @@ bool __RT_TryLoadTXT(const string fname, RegimeThresholds &out)
 // ---------------------------
 // ODCZYT z COMMON — preferuj best_summary.csv, fallback do best_regime_thresholds.csv
 // ---------------------------
+
+/*
+ Funkcja: LoadRegimeThresholds
+ Opis:    Wczytuje progi reżimów z COMMON\Files, preferując nazwę z parametru
+          (lub RT_FileNameCommonCSV), a następnie podejmuje fallback na drugi
+          plik (best_summary.csv vs best_regime_thresholds.csv). Kolejno próbuje:
+          TXT (autodetekcja), CSV z ';', CSV z ',', CSV z TAB.
+ Wywołuje: DefaultRegimeThresholds(), __RT_TryLoadTXT(), __RT_TryLoadCSV(),
+           ApplyRegimeThresholdsOverrides(), PrintFormat(), __RT_CommonFilesPath().
+ Używa globalnych (input): RT_FileNameCommonCSV, RT_EnableOverrides i RT_Override_* (przez Apply*()).
+ Wejście: out - referencja na wynik; fileNameCommonCSV - opcjonalna nazwa pliku.
+ Wyjście: true/false; w przypadku braku plików/parsingu zwraca false i ustawia domyślne progi.
+*/
 bool LoadRegimeThresholds(RegimeThresholds &out, const string fileNameCommonCSV = "")
 {
    // preferuj best_regime_thresholds.csv (zgodnie z Twoją prośbą)

@@ -13,12 +13,32 @@
 #include <StartTester/ExitManager.mqh>
 #include <StartTester/ExitTypes.mqh>
 
-// Sprawdza, czy bar o indeksie i "zahaczył" o cenę
+// -------------------------------------------------------------------
+// Opis:  Sprawdza, czy bar o indeksie i dotknął/”zahaczył” ceny 'price'
+// Wywołuje: (brak)
+// Używa globalnych: candleHistory[] (z CandleAndTranactionData11.mqh)
+// -------------------------------------------------------------------
 bool CrossedUp(double price, int i)   { return (candleHistory[i].high >= price); }
+
+// -------------------------------------------------------------------
+// Opis:  Sprawdza, czy bar o indeksie i dotknął/”zahaczył” ceny 'price'
+//        od dołu (przecięcie w dół).
+// Wywołuje: (brak)
+// Używa globalnych: candleHistory[] (z CandleAndTranactionData11.mqh)
+// -------------------------------------------------------------------
 bool CrossedDown(double price, int i) { return (candleHistory[i].low  <= price); }
 
-// Symuluje: 1) aktywację pendinga w ciągu expiryBars barów, 2) przebieg SL/TP po aktywacji.
-// Zwraca true jeśli transakcja została aktywowana; wynik w 'points' (zysk/strata w punktach).
+// -------------------------------------------------------------------
+// Opis:  Symuluje zlecenie oczekujące (pending):
+//        1) aktywację w oknie 'expiryBars' barów,
+//        2) przebieg SL/TP po aktywacji (konserwatywnie SL przed TP).
+//        Zwraca true, jeśli doszło do aktywacji; wynik w 'points' (punkty).
+// Wywołuje: PrintFormat (log), MathMax (MQL5)
+// Używa globalnych: 
+//   - candleHistory[] (przebieg słupków),
+//   - _Point (wielkość punktu, MQL5),
+//   - inputSimSpreadPoints, inputSimSlippagePoints, DebugPatternBacktest (extern/input).
+// -------------------------------------------------------------------
 bool SimulatePendingAndTradePoints(int signalIndex,
                                    bool isBuy,
                                    double pendingPrice,
@@ -77,7 +97,12 @@ bool SimulatePendingAndTradePoints(int signalIndex,
 }
 
 
-// Agregacja jakości zestawu
+// -------------------------------------------------------------------
+// Opis:  Obcięta średnia (trimmed mean) — usuwa alfa-część elementów
+//        skrajnych (z dołu i z góry) i liczy średnią ze środka.
+// Wywołuje: ArraySize, ArrayResize, ArraySort (MQL5), MathFloor
+// Używa globalnych: (brak)
+// -------------------------------------------------------------------
 double __TrimmedMean(const double &a[], double alpha)
 {
    int n = ArraySize(a);
@@ -96,6 +121,11 @@ double __TrimmedMean(const double &a[], double alpha)
    return (c>0 ? s/c : 0.0);
 }
 
+// -------------------------------------------------------------------
+// Opis:  Zwraca długość najdłuższej serii strat w tablicy wyników.
+// Wywołuje: ArraySize (MQL5)
+// Używa globalnych: (brak)
+// -------------------------------------------------------------------
 int __MaxLosingStreak(const double &a[])
 {
    int n = ArraySize(a), cur=0, mx=0;
@@ -106,6 +136,12 @@ int __MaxLosingStreak(const double &a[])
    return mx;
 }
 
+// -------------------------------------------------------------------
+// Opis:  Ocena jakości wyników (punkty): łączy obciętą średnią,
+//        winrate, średni zysk/stratę i karę za serię strat w jeden score.
+// Wywołuje: __TrimmedMean, __MaxLosingStreak, PrintFormat (log), ArraySize
+// Używa globalnych: DebugPatternBacktest (extern/input)
+// -------------------------------------------------------------------
 double EvaluatePerformance(const double &profits[])
 {
    int n = ArraySize(profits);
@@ -141,7 +177,17 @@ double EvaluatePerformance(const double &profits[])
 }
 
 
-// Symulacja pending + BE + trailing + partial + time stop (w punktach)
+// -------------------------------------------------------------------
+// Opis:  Zaawansowana symulacja: pending + BE + trailing + partial +
+//        time stop + wyjście na odwróceniu DI. Zwraca true, jeśli
+//        doszło do aktywacji; wynik w punktach w 'pointsOut'.
+// Wywołuje: Array/MQL5 (ArraySize/Resize), Math*, SymbolInfoDouble,
+//           GetCustomADXAt/GetCustomPlusDIAt/GetCustomMinusDIAt (z CandleAndTranactionData11.mqh),
+//           Print/PrintFormat (pośrednio), funkcje pomocnicze wewn.
+// Używa globalnych:
+//   - candleHistory[], _Symbol, _Point,
+//   - (pośrednio) wartości DI/ADX z buforów własnych systemu.
+// -------------------------------------------------------------------
 bool SimulatePendingAndTradePointsAdvanced(int signalIndex,
                                            bool isBuy,
                                            double pendingPrice,
@@ -227,11 +273,10 @@ bool SimulatePendingAndTradePointsAdvanced(int signalIndex,
          if(tMethod==TRAIL_ATR)
          {
             // ATR z perspektywy i+1, i+2 ...
-            int atrIdx = MathMin(i, ArraySize(candleHistory)-ATR_Period-2);
+            int period = atrPeriod;                       // ✅ używamy parametru funkcji
+            int atrIdx = MathMin(i, ArraySize(candleHistory)-period-2);
             double atr=0.0;
-            // prosta wersja ATR (jak w ExitManagerze)
-            int period = atrPeriod;
-            if(atrIdx+period+1 < ArraySize(candleHistory))
+            if(period>0 && atrIdx+period+1 < ArraySize(candleHistory))
             {
                double sum=0;
                for(int k=atrIdx; k<atrIdx+period; ++k)
@@ -306,9 +351,9 @@ bool SimulatePendingAndTradePointsAdvanced(int signalIndex,
          pointsOut = closedPoints + p*partialWeight;
          return true;
       }
-      if( (isBuy && H>=entryTP) || (!isBuy && L<=entryTP) )
+      if( (isBuy && H>=tp) || (!isBuy && L<=tp) )   // ✅ używamy zmiennej tp, nie literówki entryTP
       {
-         double p = isBuy ? (entryTP - entry) : (entry - entryTP);
+         double p = isBuy ? (tp - entry) : (entry - tp);
          pointsOut = closedPoints + p*partialWeight;
          return true;
       }
@@ -324,8 +369,19 @@ bool SimulatePendingAndTradePointsAdvanced(int signalIndex,
 // ===============================
 // Backtest: pełna symulacja z polityką wyjścia (pending->aktywacja->SL/TP/trailing)
 // ===============================
+
+// -------------------------------------------------------------------
+// Opis:  Pomocniczo: konwersja punktów (pts) na cenę w pipetach (pts*_Point).
+// Wywołuje: (brak)
+// Używa globalnych: _Point
+// -------------------------------------------------------------------
 double __Pts(double pts) { return pts * _Point; }
 
+// -------------------------------------------------------------------
+// Opis:  Prosty ATR wstecz (True Range uśredniony) z okna [centerShift..centerShift+period].
+// Wywołuje: ArraySize, MathMax, MathAbs
+// Używa globalnych: candleHistory[]
+// -------------------------------------------------------------------
 double __ATR_Back(int centerShift, int period)
 {
    int total = ArraySize(candleHistory);
@@ -340,6 +396,12 @@ double __ATR_Back(int centerShift, int period)
    }
    return sumTR / period;
 }
+
+// -------------------------------------------------------------------
+// Opis:  Najwyższe high z zakresu [fromShift .. fromShift+bars).
+// Wywołuje: ArraySize, MathMax
+// Używa globalnych: candleHistory[]
+// -------------------------------------------------------------------
 double __HighestHigh_Back(int fromShift, int bars)
 {
    int total = ArraySize(candleHistory);
@@ -348,6 +410,12 @@ double __HighestHigh_Back(int fromShift, int bars)
       hh = MathMax(hh, candleHistory[k].high);
    return hh;
 }
+
+// -------------------------------------------------------------------
+// Opis:  Najniższe low z zakresu [fromShift .. fromShift+bars).
+// Wywołuje: ArraySize, MathMin
+// Używa globalnych: candleHistory[]
+// -------------------------------------------------------------------
 double __LowestLow_Back(int fromShift, int bars)
 {
    int total = ArraySize(candleHistory);
@@ -356,6 +424,13 @@ double __LowestLow_Back(int fromShift, int bars)
       ll = MathMin(ll, candleHistory[k].low);
    return ll;
 }
+
+// -------------------------------------------------------------------
+// Opis:  Szuka świecy aktywacji zlecenia oczekującego (pending) w oknie
+//        'expiryBars' za sygnałem i (uwzględnia spread dla BUY).
+// Wywołuje: MathMax
+// Używa globalnych: candleHistory[], inputSimSpreadPoints, _Point
+// -------------------------------------------------------------------
 int __FindActivationShift(int i, bool isBuy, double entryPrice, int expiryBars)
 {
    for (int j = i - 1; j >= MathMax(1, i - expiryBars); --j) {
@@ -372,7 +447,18 @@ int __FindActivationShift(int i, bool isBuy, double entryPrice, int expiryBars)
 }
 
 
-// Główna funkcja backtestowa wyjścia:
+// -------------------------------------------------------------------
+// Opis:  Główna funkcja backtestowa pozycji: symulacja od aktywacji
+//        pendinga, przez modyfikacje SL w zależności od polityki
+//        (ATR/SWING/HYBRID), częściowe wyjścia, BE, time-stop, aż do
+//        wyjścia (SL/TP/close na barze 1). Zwraca true jeśli aktywowano.
+// Wywołuje: __FindActivationShift, __Pts, __ATR_Back, __HighestHigh_Back,
+//           __LowestLow_Back, ArraySize/Math* (MQL5)
+// Używa globalnych:
+//   - candleHistory[], _Point,
+//   - inputSimSlippagePoints (slippage dla wejścia),
+//   - Exit_ATR_Period, Exit_Swing_N_Default, Exit_Swing_OffsetPts (parametry domyślne z modułów wyjścia).
+// -------------------------------------------------------------------
 bool SimulateTradeWithExit(int i, bool isBuy, double entryPrice, double slInit, double tpInit,
                            ExitPolicy pol,
                            const ExitParamsATR &pATR,
@@ -500,9 +586,5 @@ bool SimulateTradeWithExit(int i, bool isBuy, double entryPrice, double slInit, 
 
    return true;
 }
-
-
-
-
 
 #endif

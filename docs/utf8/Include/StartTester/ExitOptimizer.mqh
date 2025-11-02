@@ -20,6 +20,9 @@ input bool DebugExitOptimizer           = true; // podsumowania (ile świec, ile
 input bool DebugExitOptimizerGridVerbose= true;// bardzo szczegółowe logi z grida
 input bool DebugExitSignals             = true;// wypisz indeksy/czasy sygnałów
 
+// Opis: Zwraca efektywną liczbę świec do skanowania z uwzględnieniem dostępnych danych.
+// Wywołania: ArraySize, MathMin, MathMax.
+// Globalne/extern: candleHistory[], ExitOpt_MinBarsFallback.
 int EffectiveScanBars(int requested)
 {
    int total = ArraySize(candleHistory);
@@ -34,6 +37,9 @@ int EffectiveScanBars(int requested)
 // Metryka jakości (odporna na outliery)
 //   score = zysk netto + premia za PF i winrate - kara za DD i małą próbkę
 // ------------------------------------------------------------------
+// Opis: Liczy PF, max DD, winrate oraz zwraca złożony score strategii na listwie zysków.
+// Wywołania: ArraySize, MathMin.
+// Globalne/extern: (brak).
 double EvaluatePerformanceAdvanced(const double &profits[],
                                    double &profitFactor,
                                    double &maxDrawdown,
@@ -82,6 +88,14 @@ double EvaluatePerformanceAdvanced(const double &profits[],
 //  - wybiera najlepszy zestaw parametrów i zapisuje go per reżim.
 // Zwraca true, jeśli znaleziono jakikolwiek sensowny zestaw.
 // ------------------------------------------------------------------
+// Opis: Pełny grid-search parametrów wyjścia dla wskazanego reżimu rynku.
+// Wywołania: ArraySize, MathMax, Print/PrintFormat, TimeToString, EffectiveScanBars,
+//            CheckImpulseConditions, GetRegimeFeatures, ClassifyRegime,
+//            SymbolInfoDouble, CalculateSLAndTP, MathMax, SimulatePendingAndTradePointsAdvanced,
+//            EvaluatePerformanceAdvanced, CopyExitParams, SaveBestExitForRegime.
+// Globalne/extern: candleHistory[], _Symbol, inputExecuteMarginPoints, inputUseSLMethod,
+//                  inputSLMultiplier, inputSLPoints, inputTPMultiplier,
+//                  DebugExitSignals, DebugExitOptimizer, DebugExitOptimizerGridVerbose.
 bool OptimizeExitParametersForRegime(MarketRegime targetRegime,
                                      int minBarsToScan,
                                      ExitParams &bestParamsOut,
@@ -296,7 +310,9 @@ bool OptimizeExitParametersForRegime(MarketRegime targetRegime,
 }
 
 
-// Helper: zbuduj „sąsiedztwo” double z klamrowaniem zakresu
+// Opis: Buduje „sąsiedztwo” wartości double wokół center z klamrowaniem do [low, high] i bez duplikatów.
+// Wywołania: ArrayResize, MathAbs.
+// Globalne/extern: (brak).
 void BuildNeighborhoodDouble(double center, double step, double low, double high, double &out[])
 {
    ArrayResize(out, 0);
@@ -314,6 +330,9 @@ void BuildNeighborhoodDouble(double center, double step, double low, double high
    }
 }
 
+// Opis: Buduje „sąsiedztwo” wartości int wokół center z klamrowaniem do [low, high] i bez duplikatów.
+// Wywołania: ArrayResize.
+// Globalne/extern: (brak).
 void BuildNeighborhoodInt(int center, int step, int low, int high, int &out[])
 {
    ArrayResize(out, 0);
@@ -329,18 +348,31 @@ void BuildNeighborhoodInt(int center, int step, int low, int high, int &out[])
    }
 }
 
-// Upewnij tablicę int/double, że ma przynajmniej 1 element (fallback)
+// Opis: Zapewnia, że tablica int ma przynajmniej jeden element; jeśli pusta — wstaw v.
+// Wywołania: ArraySize, ArrayResize.
+// Globalne/extern: (brak).
 void EnsureIntArrayHasOne(int &arr[], int v)
 {
    if(ArraySize(arr)==0){ ArrayResize(arr,1); arr[0]=v; }
 }
+
+// Opis: Zapewnia, że tablica double ma przynajmniej jeden element; jeśli pusta — wstaw v.
+// Wywołania: ArraySize, ArrayResize.
+// Globalne/extern: (brak).
 void EnsureDblArrayHasOne(double &arr[], double v)
 {
    if(ArraySize(arr)==0){ ArrayResize(arr,1); arr[0]=v; }
 }
 
 
-// Fine-tune: trzyma logikę wąskiej siatki wokół seedParams (flag używamy z seeda)
+// Opis: „Fine-tune” — strojenie parametrów wokół seedParams dla wskazanego reżimu (wąskie sąsiedztwa).
+// Wywołania: ArraySize, EffectiveScanBars, MathMax, CheckImpulseConditions,
+//            GetRegimeFeatures, ClassifyRegime, SymbolInfoDouble, CalculateSLAndTP,
+//            MathMax, SimulatePendingAndTradePointsAdvanced, EvaluatePerformanceAdvanced,
+//            BuildNeighborhoodDouble/Int, Ensure*ArrayHasOne, CopyExitParams,
+//            SaveBestExitForRegime, PrintFormat.
+// Globalne/extern: candleHistory[], _Symbol, inputExecuteMarginPoints, inputUseSLMethod,
+//                  inputSLMultiplier, inputSLPoints, inputTPMultiplier.
 bool RefineExitParametersForRegime(MarketRegime regime,
                                    int minBarsToScan,
                                    const ExitParams &seedParams,
@@ -538,7 +570,10 @@ bool RefineExitParametersForRegime(MarketRegime regime,
 }
 
 
-
+// Opis: Pipeline „coarse→fine” dla wszystkich reżimów; coarse szuka seedów, fine może je doprecyzować.
+// Wywołania: EffectiveScanBars, PrintFormat, OptimizeExitParametersForRegime,
+//            RefineExitParametersForRegime (komentarz), SaveBestExitParamsToFile.
+// Globalne/extern: candleHistory[], DebugExitOptimizer.
 void OptimizeExitParametersAllRegimes_CoarseFine(int minBarsToScan = 300, bool saveToFile = true)
 {
    int effScan = EffectiveScanBars(minBarsToScan);
@@ -570,7 +605,9 @@ void OptimizeExitParametersAllRegimes_CoarseFine(int minBarsToScan = 300, bool s
 }
 
 
-// alias zgodny z wcześniejszym stylem
+// Opis: Alias — uruchamia coarse/fine z zapisem do pliku.
+// Wywołania: OptimizeExitParametersAllRegimes_CoarseFine.
+// Globalne/extern: (brak).
 void OptimizeExitParameters(int minBarsToScan = 300)
 {
    OptimizeExitParametersAllRegimes_CoarseFine(minBarsToScan, /*saveToFile=*/true);
@@ -578,6 +615,9 @@ void OptimizeExitParameters(int minBarsToScan = 300)
 
 
 // --- TRWAŁOŚĆ najlepszych parametrów do pliku (COMMON) ---
+// Opis: Zapisuje „best exit params” dla reżimów, które mają wynik (g_hasBest/g_best) do CSV.
+// Wywołania: FileOpen/FileWrite/FileClose, Print, CopyExitParams.
+// Globalne/extern: g_hasBest[4], g_best[4] (z ExitPolicy.mqh).
 bool SaveBestExitParamsToFile(string fname = "best_exit_params.csv")
 {
    int h = FileOpen(fname, FILE_WRITE | FILE_COMMON | FILE_TXT, ';');
@@ -604,6 +644,9 @@ bool SaveBestExitParamsToFile(string fname = "best_exit_params.csv")
    return true;
 }
 
+// Opis: Wczytuje „best exit params” z CSV do struktur g_best/g_hasBest.
+// Wywołania: FileOpen/FileReadNumber/FileIsEnding/FileClose, Print, CopyExitParams (pośrednio przez przypis).
+// Globalne/extern: g_best[4], g_hasBest[4].
 bool LoadBestExitParamsFromFile(string fname = "best_exit_params.csv")
 {
    int h = FileOpen(fname, FILE_READ | FILE_COMMON | FILE_TXT, ';');
@@ -636,6 +679,9 @@ bool LoadBestExitParamsFromFile(string fname = "best_exit_params.csv")
 // ------------------------------------------------------------------
 // Skan 4 reżimów „za jednym zamachem”
 // ------------------------------------------------------------------
+// Opis: Uruchamia OptimizeExitParametersForRegime dla czterech klasycznych reżimów.
+// Wywołania: OptimizeExitParametersForRegime.
+// Globalne/extern: (brak).
 void OptimizeExitParametersAllRegimes(int minBarsToScan = 300)
 {
    ExitParams bp; double bs;

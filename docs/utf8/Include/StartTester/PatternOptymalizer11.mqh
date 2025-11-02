@@ -3,7 +3,6 @@
 
 #property strict
 
-
 #include <StartTester/Zmienne11.mqh>
 #include <StartTester/CandleAndTranactionData11.mqh>
 #include <StartTester/RangeAndVolumeAnalyzer11.mqh>
@@ -16,9 +15,8 @@
 #define NUM_REGIMES 4
 #endif
 
-
 // Parametry (legacy – zostawiamy dla zgodności z wcześniejszymi analizami)
-double impulseRangeFactor = 1.6;
+double impulseRangeFactor  = 1.6;
 double impulseVolumeFactor = 1.5;
 
 double accumulationRangeFactor = 0.8;
@@ -26,14 +24,13 @@ double accumulationVolumeFactor = 0.7;
 
 double fakeBreakoutRangeMinFactor = 0.5;
 double fakeBreakoutRangeMaxFactor = 1.2;
-double fakeBreakoutVolumeFactor  = 1.0;
+double fakeBreakoutVolumeFactor   = 1.0;
 
 // Progi DI/ADX (legacy – dziś mniej istotne przy nowym detektorze)
 int impulseAdxThreshold = 20;
 int impulseMinDiffDI    = 10;
 
 int impulseLiveCandleCounter = 0;
-
 int maxTestCandles = 300;
 
 // ===== Kandydaci wyjść do optymalizacji =====
@@ -44,22 +41,35 @@ double CAND_HYB_BE_R[]    = {0.8, 1.0, 1.2};
 double CAND_HYB_TRAIL_K[] = {2.6, 3.2, 3.8};
 
 // Zapamiętany „ostatni dobry” zestaw impulsu (legacy)
-double lastGoodImpulseRangeFactor = 1.6;
-double lastGoodImpulseVolumeFactor= 1.5;
-int    lastGoodImpulseAdxThreshold= 20;
-int    lastGoodImpulseMinDiffDI   = 10;
+double lastGoodImpulseRangeFactor  = 1.6;
+double lastGoodImpulseVolumeFactor = 1.5;
+int    lastGoodImpulseAdxThreshold = 20;
+int    lastGoodImpulseMinDiffDI    = 10;
 
 int impulseCandlesSinceLastDetection = 0;
 
 // ─────────────────────────────────────────────────────────────
 // Skróty Z-score (jak w detektorze)
+
+// --- OPIS FUNKCJI ---
+// ZVol: skrót do GetStandardizedVolume(shift) dla wygody.
+// Wywołuje: GetStandardizedVolume.
+// Używa globalnych: (pośrednio) bufory/źródła z RangeAndVolumeAnalyzer11.mqh.
 double ZVol(int shift=1)   { return GetStandardizedVolume(shift); }
+
+// --- OPIS FUNKCJI ---
+// ZRange: skrót do GetStandardizedRange(shift) dla wygody.
+// Wywołuje: GetStandardizedRange.
+// Używa globalnych: (pośrednio) bufory/źródła z RangeAndVolumeAnalyzer11.mqh.
 double ZRange(int shift=1) { return GetStandardizedRange(shift); }
 
 // ─────────────────────────────────────────────────────────────
 // NARZĘDZIA DIAGNOSTYCZNE DETEKTORA
 
-// Pomoc: percentyl z tablicy (kopiuje i sortuje asc).
+// --- OPIS FUNKCJI ---
+// __Percentile: oblicza percentyl p (0..1) z tablicy src (kopiuje i sortuje rosnąco).
+// Wywołuje: ArrayResize, ArraySort, MathFloor, MathCeil.
+// Używa globalnych: brak.
 double __Percentile(const double &src[], int n, double p)
 {
    if(n<=0) return 0.0;
@@ -78,7 +88,10 @@ double __Percentile(const double &src[], int n, double p)
    return tmp[lo]*(1.0-w) + tmp[hi]*w;
 }
 
-// 1) Profil rozkładu |ZRange| i |ZVol| + rekomendacje progów IMP_ZR_MIN/IMP_ZV_MIN
+// --- OPIS FUNKCJI ---
+// RecommendDetectorThresholds: profiluje rozkład |Zr| i |Zv| w próbie i sugeruje progi IMP_ZR_MIN/IMP_ZV_MIN (diagnostyka).
+// Wywołuje: ArraySize, MathMin/Max, ArrayResize, MathAbs, __Percentile, PrintFormat.
+// Używa globalnych: candleHistory, DebugOptimizer (logi).
 void RecommendDetectorThresholds(int sampleWindow=400, double pZr=0.75, double pZv=0.75)
 {
    const int total = ArraySize(candleHistory);
@@ -121,7 +134,10 @@ void RecommendDetectorThresholds(int sampleWindow=400, double pZr=0.75, double p
    }
 }
 
-// 2) Walidacja statystyk detektora dla AKTUALNYCH progów (per-regime)
+// --- OPIS FUNKCJI ---
+// ValidateImpulseDetectorStats: liczy trafienia CheckImpulseConditions per-reżim w oknie lookback (sanity-check).
+// Wywołuje: ArraySize, MathMin/Max, ArrayInitialize, DetectRegimeKey, CheckImpulseConditions, PrintFormat.
+// Używa globalnych: candleHistory, DebugOptimizer, NUM_REGIMES.
 void ValidateImpulseDetectorStats(int lookback=600)
 {
    const int total = ArraySize(candleHistory);
@@ -161,6 +177,12 @@ void ValidateImpulseDetectorStats(int lookback=600)
 // ─────────────────────────────────────────────────────────────
 // LEGACY: Optymalizacje formacji (zostawione dla kompatybilności)
 
+// --- OPIS FUNKCJI ---
+// OptimizeImpulsePattern (legacy): grid-search progów impulsu (range/volume/ADX/ΔDI), szybka symulacja i scoring.
+// Wywołuje: ArraySize/MathMin/Max, ComputeCustomADX, Print/PrintFormat, GetCustomADXAt/GetCustomPlusDIAt/GetCustomMinusDIAt,
+//           SymbolInfoDouble, CalculateSLAndTP, SimulatePendingAndTradePoints, EvaluatePerformance.
+// Używa globalnych: candleHistory, inputExecuteMarginPoints, inputUseSLMethod, inputSLMultiplier, inputSLPoints, inputTPMultiplier,
+//                   inputPendingExpiryBars, _Symbol, impulseRangeFactor/VolumeFactor/AdxThreshold/MinDiffDI, DebugPatternImpulse, maxTestCandles.
 void OptimizeImpulsePattern(double avgRange, double avgVolume)
 {
    double bestScore = -1.0;
@@ -246,17 +268,20 @@ void OptimizeImpulsePattern(double avgRange, double avgVolume)
 
    if (bestScore >= 0.0)
    {
-      impulseRangeFactor = bestR;
-      impulseVolumeFactor= bestV;
-      impulseAdxThreshold= bestAdx;
-      impulseMinDiffDI   = bestDiff;
+      impulseRangeFactor  = bestR;
+      impulseVolumeFactor = bestV;
+      impulseAdxThreshold = bestAdx;
+      impulseMinDiffDI    = bestDiff;
 
       if (DebugPatternImpulse)
          PrintFormat("✅ (legacy) Impuls: R>=%.2fx V>=%.2fx ADX≥%d ΔDI≥%d", bestR,bestV,bestAdx,bestDiff);
    }
 }
 
-// Akumulacja (legacy)
+// --- OPIS FUNKCJI ---
+// ConfirmAccumulation (legacy): potwierdza akumulację na barze i na bazie range/volume oraz krótkoterminowej kontynuacji.
+// Wywołuje: GetCurrentSessionAverageRange/Volume, GetCustomADXAt/GetCustomPlusDIAt/GetCustomMinusDIAt.
+// Używa globalnych: candleHistory, accumulationRangeFactor/accumulationVolumeFactor.
 bool ConfirmAccumulation(int i)
 {
    if (i + 3 >= ArraySize(candleHistory)) return false;
@@ -290,6 +315,10 @@ bool ConfirmAccumulation(int i)
    return confirmationFound;
 }
 
+// --- OPIS FUNKCJI ---
+// OptimizeAccumulationPattern (legacy): skanuje zakresy progów r, v dla akumulacji i wybiera najlepsze wg odsetka potwierdzeń.
+// Wywołuje: ArraySize/MathMin/Max, ConfirmAccumulation.
+// Używa globalnych: candleHistory, accumulationRangeFactor/accumulationVolumeFactor, maxTestCandles.
 void OptimizeAccumulationPattern(double avgRange, double avgVolume)
 {
    double bestScore = -1, bestR = 0, bestV = 0;
@@ -319,12 +348,15 @@ void OptimizeAccumulationPattern(double avgRange, double avgVolume)
    }
 
    if (bestScore >= 0) {
-      accumulationRangeFactor = bestR;
-      accumulationVolumeFactor= bestV;
+      accumulationRangeFactor  = bestR;
+      accumulationVolumeFactor = bestV;
    }
 }
 
-// Fake breakout (legacy)
+// --- OPIS FUNKCJI ---
+// ConfirmFakeBreakout (legacy): sprawdza prosty „fałszywy wybicie” przez relację świec i i+1 do i-1.
+// Wywołuje: brak dodatkowych (korzysta z candleHistory).
+// Używa globalnych: candleHistory.
 bool ConfirmFakeBreakout(int i)
 {
    if (i + 1 >= ArraySize(candleHistory)) return false;
@@ -336,6 +368,10 @@ bool ConfirmFakeBreakout(int i)
    return false;
 }
 
+// --- OPIS FUNKCJI ---
+// OptimizeFakeBreakoutPattern (legacy): grid progów range min/max i wolumenu, ocena przez odsetek potwierdzeń fake breakout.
+// Wywołuje: ArraySize/MathMin/Max, ConfirmFakeBreakout.
+// Używa globalnych: candleHistory, fakeBreakoutRangeMinFactor/MaxFactor/VolumeFactor, maxTestCandles.
 void OptimizeFakeBreakoutPattern(double avgRange, double avgVolume)
 {
    double bestScore = -1, bestMin = 0.5, bestMax = 1.2, bestVol = 1.0;
@@ -376,6 +412,12 @@ void OptimizeFakeBreakoutPattern(double avgRange, double avgVolume)
 // Auto-optymalizacja co sesję (wywołuj z OnTick/OnTimer po zamknięciu świecy)
 SessionType lastOptimizedSession = SESSION_UNKNOWN;
 
+// --- OPIS FUNKCJI ---
+// MaybeOptimizeParametersHistorical: periodyczny „tick” auto-optymalizacji (po zmianie sesji / co X barów).
+// Wywołuje: GetSession/IsSessionDataReady/SessionTypeToString, GetCurrentSessionAverageRange/Volume,
+//           RecommendDetectorThresholds, ValidateImpulseDetectorStats, OptimizeExitsPerRegime.
+// Używa globalnych: candleHistory, impulseLiveCandleCounter, lastOptimizedSession, impulseCandlesSinceLastDetection,
+//                   lastGoodImpulse* (legacy), DebugPatternEval.
 void MaybeOptimizeParametersHistorical()
 {
    if (ArraySize(candleHistory) < 2) return;
@@ -429,10 +471,13 @@ void MaybeOptimizeParametersHistorical()
    ValidateImpulseDetectorStats(500);
 
    OptimizeExitsPerRegime();
-   MaybeRefreshMAPeriods_Auto();
 }
 
-// Wywołuj tylko na starcie – pełny run
+// --- OPIS FUNKCJI ---
+// ForceOptimizeParametersHistorical: pełny „bootstrap-safe” run optymalizacji/diagnostyki na starcie.
+// Wywołuje: AnalyzeInitialSessionRangesAndVolumes, RecommendDetectorThresholds, ValidateImpulseDetectorStats,
+//           OptimizeExitsPerRegime.
+// Używa globalnych: candleHistory, DebugPatternEval.
 void ForceOptimizeParametersHistorical()
 {
    const int total = ArraySize(candleHistory);
@@ -452,17 +497,6 @@ void ForceOptimizeParametersHistorical()
 
    OptimizeExitsPerRegime();
 
-   if (UsePerRegimeMA && UsePerRegimeMA_Auto) {
-      if (total >= 200) {
-         RecommendPerRegimeMA_Apply(MARec_Lookback,
-                                    MARec_FastMin, MARec_FastMax, MARec_FastStep,
-                                    MARec_SlowMin, MARec_SlowMax, MARec_SlowStep,
-                                    MARec_MinSamples);
-      } else if (DebugMARecommend) {
-         PrintFormat("[MA-AUTO] BOOTSTRAP: total=%d < 200 – najpierw zbierzemy trochę historii.", total);
-      }
-   }
-
    if (DebugPatternEval)
       Print("[FORCE] Done (bootstrap-safe).");
 }
@@ -470,6 +504,13 @@ void ForceOptimizeParametersHistorical()
 // ─────────────────────────────────────────────────────────────
 // OPT: WYJŚCIA PER-REGIME  (główna, aktualna część)
 
+// --- OPIS FUNKCJI ---
+// OptimizeExitsPerRegime: generuje sygnały wejścia (CheckImpulseConditions), a następnie per-reżim wybiera najlepszą politykę wyjścia
+// (ATR/SWING/HYBRID) na podstawie symulacji SimulateTradeWithExit + EvaluatePerformance. Zapisuje best do ExitEngine.
+// Wywołuje: ArraySize/MathMax/Min, ComputeCustomADX, DetectRegimeKey, CheckImpulseConditions, SymbolInfoDouble,
+//           CalculateSLAndTP, SimulateTradeWithExit, EvaluatePerformance, ExitEngine_SetBestForRegime, PrintFormat.
+// Używa globalnych: candleHistory, _Symbol, inputExecuteMarginPoints, inputUseSLMethod, SL/TP paramy, inputPendingExpiryBars,
+//                   Exit_* (domyślne), CAND_* (kandydaci), NUM_REGIMES, DebugOptimizer, maxTestCandles.
 void OptimizeExitsPerRegime()
 {
    const int total = ArraySize(candleHistory);
@@ -627,190 +668,6 @@ void OptimizeExitsPerRegime()
 
       if (DebugOptimizer)
          PrintFormat("[OPT-EXIT] regime=%d -> policy=%d score=%.3f", r, (int)bestPol, bestScore);
-   }
-}
-
-// =====================================================================
-//  MA AUTO per-regime
-// =====================================================================
-int  ActiveMA_Fast_PerRegime[NUM_REGIMES] = {20,20,20,20};
-int  ActiveMA_Slow_PerRegime[NUM_REGIMES] = {50,50,50,50};
-bool ActiveMA_Ready = false;
-
-static datetime __MA_lastBarTime = 0;
-static int      __MA_barsSince   = 0;
-static SessionType __MA_lastSess = SESSION_UNKNOWN;
-
-double __MAREC_SMA_Close(int shift, int period)
-{
-   int total = ArraySize(candleHistory);
-   if (period <= 0 || shift < 1 || shift + period - 1 >= total) return 0.0;
-   double s = 0.0;
-   for (int k=shift; k<shift+period; ++k) s += candleHistory[k].close;
-   return s / period;
-}
-
-struct __MARec { int fast; int slow; double acc; int samples; };
-
-bool __MARecBetter(const __MARec &a, const __MARec &b)
-{
-   if (a.acc     != b.acc)     return a.acc > b.acc;
-   if (a.samples != b.samples) return a.samples > b.samples;
-   return (a.fast + a.slow) < (b.fast + b.slow);
-}
-
-// Główna: policz i ZASTOSUJ okresy MA per-regime
-void RecommendPerRegimeMA_Apply(int lookback,
-                                int fastMin, int fastMax, int fastStep,
-                                int slowMin, int slowMax, int slowStep,
-                                int minSamples)
-{
-   const int total = ArraySize(candleHistory);
-   const int effLookback = MathMin(lookback, MathMax(20, total - 2));
-
-   // BOOTSTRAP: bardzo mało danych -> fallback do aktualnych ActiveMA_* lub 20/50
-   if (effLookback < 20) {
-      if (DebugMARecommend)
-         PrintFormat("[MA-AUTO] BOOTSTRAP: total=%d – używam fallback (ActiveMA/domysły) bez skanowania.", total);
-
-      for (int reg = 0; reg < NUM_REGIMES; ++reg) {
-         int f = ActiveMA_Fast_PerRegime[reg] > 0 ? ActiveMA_Fast_PerRegime[reg] : 20;
-         int s = ActiveMA_Slow_PerRegime[reg] > f ? ActiveMA_Slow_PerRegime[reg] : 50;
-         f = MathMax(fastMin, MathMin(fastMax, f));
-         s = MathMax(f+1,     MathMin(slowMax, s));
-         ActiveMA_Fast_PerRegime[reg] = f;
-         ActiveMA_Slow_PerRegime[reg] = s;
-         if (DebugMARecommend)
-            PrintFormat("[MA-AUTO] reg=%d Fallback -> fast=%d slow=%d", reg, f, s);
-      }
-      ActiveMA_Ready = true;
-      return;
-   }
-
-   int slowMaxEff = MathMin(slowMax, MathMax(slowMin, effLookback - 2));
-   int fastMaxEff = MathMin(fastMax, MathMax(fastMin, slowMaxEff - 1));
-
-   int effMinSamples = MathMin(minSamples, MathMax(5, effLookback / 8));
-   int from = MathMax(10, total - effLookback);
-   int upto = total - 2;
-
-   ComputeCustomADX(14);
-   int updated = 0;
-
-   for (int reg = 0; reg < NUM_REGIMES; ++reg)
-   {
-      __MARec best; best.fast=0; best.slow=0; best.acc=-1.0; best.samples=0;
-
-      for (int f = fastMin; f <= fastMaxEff; f += fastStep)
-      for (int s = MathMax(slowMin, f+1); s <= slowMaxEff; s += slowStep)
-      {
-         int hits=0, miss=0;
-
-         for (int i = upto; i >= from; --i)
-         {
-            if (DetectRegimeKey(i) != reg) continue;
-
-            double maF = __MAREC_SMA_Close(i, f);
-            double maS = __MAREC_SMA_Close(i, s);
-            if (maF <= 0.0 || maS <= 0.0) continue;
-
-            double c = candleHistory[i].close;
-            bool condBuy  = (c > MathMax(maF, maS)) && (maF >= maS);
-            bool condSell = (c < MathMin(maF, maS)) && (maF <= maS);
-            if (!condBuy && !condSell) continue;
-
-            double adx = GetCustomADXAt(i);
-            double pdi = GetCustomPlusDIAt(i);
-            double mdi = GetCustomMinusDIAt(i);
-            if (adx < impulseAdxThreshold) continue;
-
-            int dirDI = (pdi >= mdi) ? +1 : -1;
-            int dirMA = condBuy ? +1 : -1;
-
-            if (dirMA == dirDI) hits++; else miss++;
-         }
-
-         int samples = hits + miss;
-         if (samples < effMinSamples) continue;
-
-         double acc = (double)hits / MathMax(1, samples);
-         __MARec cand; cand.fast=f; cand.slow=s; cand.acc=acc; cand.samples=samples;
-
-         bool take = true;
-         #ifdef __MARecBetter_available
-            take = __MARecBetter(cand, best);
-         #else
-            if (cand.acc != best.acc)         take = (cand.acc > best.acc);
-            else if (cand.samples != best.samples) take = (cand.samples > best.samples);
-            else take = ((cand.fast + cand.slow) < (best.fast + best.slow));
-         #endif
-
-         if (take) { best = cand; }
-      }
-
-      if (best.acc >= 0.0)
-      {
-         int oldF = ActiveMA_Fast_PerRegime[reg];
-         int oldS = ActiveMA_Slow_PerRegime[reg];
-         ActiveMA_Fast_PerRegime[reg] = best.fast;
-         ActiveMA_Slow_PerRegime[reg] = best.slow;
-         updated++;
-         if (DebugMARecommend)
-            PrintFormat("[MA-AUTO] reg=%d -> fast=%d slow=%d (acc=%.1f%% n=%d)  [was: %d/%d]",
-                        reg, best.fast, best.slow, 100.0*best.acc, best.samples, oldF, oldS);
-      }
-      else
-      {
-         // lokalny fallback: trzymaj obecne ActiveMA lub 20/50 w rozsądnych granicach
-         int f = ActiveMA_Fast_PerRegime[reg] > 0 ? ActiveMA_Fast_PerRegime[reg] : 20;
-         int s = ActiveMA_Slow_PerRegime[reg] > f ? ActiveMA_Slow_PerRegime[reg] : 50;
-         f = MathMax(fastMin, MathMin(fastMaxEff, f));
-         s = MathMax(f+1,     MathMin(slowMaxEff, s));
-         ActiveMA_Fast_PerRegime[reg] = f;
-         ActiveMA_Slow_PerRegime[reg] = s;
-
-         if (DebugMARecommend)
-            PrintFormat("[MA-AUTO] reg=%d: fallback (samples<%d). Ustawiam fast=%d slow=%d",
-                        reg, effMinSamples, f, s);
-      }
-   }
-
-   ActiveMA_Ready = true;
-
-   if (DebugMARecommend)
-      PrintFormat("[MA-AUTO] Zakończono. updated=%d/%d | effLookback=%d | effMinSamples=%d",
-                  updated, NUM_REGIMES, effLookback, effMinSamples);
-}
-
-// Wywołuj cyklicznie: co nową zamkniętą świecę zliczaj, a gdy dojdzie do progu – odśwież
-void MaybeRefreshMAPeriods_Auto()
-{
-   if (!UsePerRegimeMA || !UsePerRegimeMA_Auto) return;
-   if (ArraySize(candleHistory) < 2) return;
-
-   datetime t1 = candleHistory[1].time;
-   if (t1 != __MA_lastBarTime) {
-      __MA_lastBarTime = t1;
-      __MA_barsSince++;
-   }
-
-   SessionType sess = GetSession(t1);
-   bool sessionChanged = (sess != __MA_lastSess && sess != SESSION_UNKNOWN);
-   bool enoughBars     = (__MA_barsSince >= MARec_RefreshEveryBars);
-
-   if ((sessionChanged || enoughBars) && IsSessionDataReady())
-   {
-      if (DebugMARecommend)
-         PrintFormat("[MA-AUTO] Refresh (bars=%d, session%schange) ...",
-                     __MA_barsSince, sessionChanged? "=":" no ");
-
-      RecommendPerRegimeMA_Apply(MARec_Lookback,
-                                 MARec_FastMin, MARec_FastMax, MARec_FastStep,
-                                 MARec_SlowMin, MARec_SlowMax, MARec_SlowStep,
-                                 MARec_MinSamples);
-
-      __MA_barsSince = 0;
-      __MA_lastSess  = sess;
    }
 }
 

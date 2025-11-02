@@ -7,7 +7,17 @@
 #property strict
 
 
-// Używany w ExitPolicy/ExitOptimizer/ExitManager/PatternBacktest
+// ---------------------------------------------------------------------
+// Opis: Enum TrailMethod — typ wyliczeniowy określający metodę trailing
+//       stopu używaną w modułach wyjścia (ExitPolicy/ExitOptimizer/
+//       ExitManager/PatternBacktest).
+// Wywołuje: (brak; to tylko definicja typu).
+// Używa globalnych: (brak).
+// Uwaga: Wartości są wykorzystywane jako przełączniki logiki w innych
+//        plikach (np. TRAIL_ATR → trailing po ATR, TRAIL_STEP → schodkowy,
+//        TRAIL_CANDLE → za poprzednią świecą). Nie zmieniaj kolejności
+//        i wartości bez aktualizacji kodu korzystającego z enum.
+// ---------------------------------------------------------------------
 enum TrailMethod
 {
    TRAIL_NONE = 0,
@@ -17,4 +27,3 @@ enum TrailMethod
 };
 
 #endif // __EXIT_TYPES_MQH__
-

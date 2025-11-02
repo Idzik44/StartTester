@@ -16,6 +16,11 @@ struct ExitParams {
    bool useDIExit;  int adxMin; int diMin; int diDiff;
 };
 
+// ---------------------------------------------------------------------
+// Opis: Kopiuje wszystkie pola ze struktury src do dst (bez alokacji).
+// Wywołuje: (brak).
+// Używa globalnych: (brak).
+// ---------------------------------------------------------------------
 void CopyExitParams(ExitParams &dst, const ExitParams &src)
 {
    dst.useBE = src.useBE;           dst.beR = src.beR;               dst.beOffsetPts = src.beOffsetPts;
@@ -27,6 +32,12 @@ void CopyExitParams(ExitParams &dst, const ExitParams &src)
 }
 
 
+// ---------------------------------------------------------------------
+// Opis: Sprawdza, czy platforma/symbol wspiera częściowe zamknięcia po wolumenie
+//       (na podstawie minimalnego wolumenu i kroku wolumenu). Heurystyka dla BT.
+// Wywołuje: SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN / SYMBOL_VOLUME_STEP).
+// Używa globalnych: _Symbol (symbol bieżący, MQL5).
+// ---------------------------------------------------------------------
 bool CanPartialByLot()
 {
    double vol  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -36,6 +47,12 @@ bool CanPartialByLot()
    return (posMin > 0.0);
 }
 
+// ---------------------------------------------------------------------
+// Opis: Buduje i zwraca domyślny zestaw parametrów wyjścia dla zadanego
+//       reżimu rynku; uwzględnia flagę allowPartial (czy dopuszczać partial).
+// Wywołuje: (brak).
+// Używa globalnych: (brak).
+// ---------------------------------------------------------------------
 ExitParams DefaultExitForRegime(MarketRegime r, bool allowPartial)
 {
    ExitParams p;
@@ -88,12 +105,23 @@ ExitParams DefaultExitForRegime(MarketRegime r, bool allowPartial)
 static bool g_hasBest[4] = {false,false,false,false};
 static ExitParams g_best[4];
 
+// ---------------------------------------------------------------------
+// Opis: Zwraca najlepsze zapisane parametry dla reżimu r (jeśli są w RAM);
+//       w przeciwnym razie zwraca domyślne z allowPartial=true.
+// Wywołuje: DefaultExitForRegime(r, true).
+// Używa globalnych: g_hasBest[], g_best[].
+// ---------------------------------------------------------------------
 ExitParams LoadBestExitForRegime(MarketRegime r)
 {
    if(g_hasBest[(int)r]) return g_best[(int)r];
    return DefaultExitForRegime(r, /*allowPartial*/true);
 }
 
+// ---------------------------------------------------------------------
+// Opis: Zapisuje (do pamięci) najlepsze parametry p dla reżimu r.
+// Wywołuje: (brak; opcjonalnie zapis do pliku w przyszłości).
+// Używa globalnych: g_best[], g_hasBest[].
+// ---------------------------------------------------------------------
 void SaveBestExitForRegime(MarketRegime r, const ExitParams &p)
 {
    g_best[(int)r] = p;
@@ -101,6 +129,12 @@ void SaveBestExitForRegime(MarketRegime r, const ExitParams &p)
    // (opcjonalnie: zapisz do pliku, by przetrwać restart)
 }
 
+// ---------------------------------------------------------------------
+// Opis: Wersja funkcji domyślnej „by reference” — wypełnia strukturę out
+//       domyślnymi wartościami zależnymi od reżimu i allowPartial.
+// Wywołuje: (brak).
+// Używa globalnych: (brak).
+// ---------------------------------------------------------------------
 void DefaultExitForRegime(MarketRegime r, bool allowPartial, ExitParams &out)
 {
    // zacznij od „wyłączone”
@@ -146,6 +180,12 @@ void DefaultExitForRegime(MarketRegime r, bool allowPartial, ExitParams &out)
    }
 }
 
+// ---------------------------------------------------------------------
+// Opis: Wypełnia out najlepszymi parametrami dla reżimu r z RAM,
+//       a jeśli brak — ustawia domyślne; zwraca true, jeśli istniał best.
+// Wywołuje: CopyExitParams(out, g_best[r]) lub DefaultExitForRegime(r, true, out).
+// Używa globalnych: g_hasBest[], g_best[].
+// ---------------------------------------------------------------------
 bool LoadBestExitForRegime(MarketRegime r, ExitParams &out)
 {
    if(g_hasBest[(int)r]) { CopyExitParams(out, g_best[(int)r]); return true; }

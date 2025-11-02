@@ -7,7 +7,6 @@
 
 #property strict
 
-
 #include <Trade\Trade.mqh>
 
 #include <StartTester/Zmienne11.mqh>
@@ -18,6 +17,16 @@
 CTrade trade; // Instancja klasy CTrade
 
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: CalculateLotSize
+// Opis:    Wylicza wielkość pozycji w lotach – jako stała wartość (CalculationMode=0)
+//          albo jako procent ryzyka od kapitału (CalculationMode=1). Gdy SL w punktach
+//          niepodany, odległość SL liczona jest z różnicy między marketPrice a stopLossPrice.
+//          Dodatkowo dopasowuje wynik do ograniczeń brokera: VOLUME_STEP/MIN/MAX.
+// Wywołuje: AccountInfoDouble(ACCOUNT_MARGIN_FREE), SymbolInfoDouble(), SymbolInfoInteger(), NormalizeDouble().
+// Globalne/extern: _Symbol, inputAccountRiskCapital (z Zmienne11.mqh), _Digits.
+// Zwraca:  lotSize znormalizowany do 2 miejsc po przecinku.
+// ─────────────────────────────────────────────────────────────
 double CalculateLotSize(
     double stopLossDistancePoints,
     double stopLossPrice,
@@ -32,7 +41,7 @@ double CalculateLotSize(
 
     double lotSize = 0.0;
     double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-    double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+    double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
 
     if (tickValue <= 0.0 || tickSize <= 0.0)
         return 0.0;
@@ -73,15 +82,38 @@ double CalculateLotSize(
         }
     }
 
+    // 🔒 Dopasowanie do ograniczeń brokera (bez zmiany logiki risk modelu)
+    double volStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+    double volMin  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+    double volMax  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+
+    if (volStep > 0.0)
+        lotSize = MathFloor(lotSize / volStep) * volStep; // zaokrąglenie w dół do kroku
+
+    if (volMin > 0.0 && lotSize < volMin)
+        lotSize = volMin;
+
+    if (volMax > 0.0 && lotSize > volMax)
+        lotSize = volMax;
+
     return NormalizeDouble(lotSize, 2);
 }
 
 
 
-
-// Funkcja do obliczania SL i TP
-
-
+// ─────────────────────────────────────────────────────────────
+// Funkcja: CalculateSLAndTP
+// Opis:    Ustala poziomy SL/TP wg wybranej metody:
+//          (0) po ostatnich ważnych szczytach/dołkach (Highs/Lows),
+//          (1) konsolidacja: entry ± range*SLMultiplier,
+//          (2) stałe SLPoints,
+//          (3) świeca sygnałowa (candleHistory[1]) ± SLPoints.
+//          Następnie wylicza TP jako wielokrotność odległości SL od ceny wejścia (TPMultiplier).
+// Wywołuje: SymbolInfoDouble(), SymbolInfoInteger(), Print(), NormalizeDouble().
+// Globalne/extern: _Symbol, _Digits, Highs[], Lows[] (z PeaksEnded11.mqh),
+//                  candleHistory[], maxHigh, minLow (z modułów danych), _Period.
+// Zwraca:  przez referencje: stopLossPrice, takeProfitPrice.
+// ─────────────────────────────────────────────────────────────
 void CalculateSLAndTP(
     double &stopLossPrice,
     double &takeProfitPrice,
@@ -199,10 +231,16 @@ void CalculateSLAndTP(
 
 
 
-
-
-
-
+// ─────────────────────────────────────────────────────────────
+// Funkcja: CheckClosingConditions
+// Opis:    Realizuje warunki zamykania pozycji:
+//          (a) o określonej godzinie (hourToClose), lub
+//          (b) po odczekaniu zadanej liczby świec od otwarcia (candleCountToWait).
+//          Przegląda aktywne pozycje/zlecenia i decyduje o CloseOrdersAndPositions().
+// Wywołuje: TimeCurrent(), TimeToStruct(), CloseOrdersAndPositions(), PeriodSeconds().
+// Globalne/extern: hourToClose, candleCountToWait, inputMagicNumber,
+//                  activeOrdersAndPositions[], _Symbol, _Period.
+// ─────────────────────────────────────────────────────────────
 void CheckClosingConditions()
 {
     static datetime lastCloseTime = 0;       // Czas ostatniego zamknięcia
@@ -261,9 +299,24 @@ void CheckClosingConditions()
         positionOpenTime = 0;
     }
 }
-//komentarze do CancelOldPendingOrders
+
+
+// ─────────────────────────────────────────────────────────────
+// (flaga) PrintCancelOldPendingOrders – steruje logowaniem w CancelOldPendingOrders
+// ─────────────────────────────────────────────────────────────
 bool PrintCancelOldPendingOrders = false;
 
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: CancelOldPendingOrders
+// Tematyka: porządkowanie starych zleceń oczekujących.
+// Opis:    Odświeża stan zleceń/pozycji, dla bieżącej zamkniętej świecy (candleHistory[1])
+//          wyznacza jej indeks i dla zleceń oczekujących (z danym magicNumber i symbolem)
+//          sprawdza ich „wiek” w świecach. Jeśli ≥ maxBarsToWait – usuwa zlecenie.
+// Wywołuje: RefreshOrderAndPositionData(), FindIndexByTime(), OrderSelect(), trade.OrderDelete().
+// Globalne/extern: candleHistory[], activeOrdersAndPositions[], _Symbol,
+//                  PrintCancelOldPendingOrders (lokalna flaga).
+// ─────────────────────────────────────────────────────────────
 void CancelOldPendingOrders(int maxBarsToWait, ulong magicNumber)
 {
     RefreshOrderAndPositionData();
@@ -273,7 +326,7 @@ void CancelOldPendingOrders(int maxBarsToWait, ulong magicNumber)
     if (currentIndex == -1)
     {
         if (PrintCancelOldPendingOrders)
-        Print("⚠️ Nie znaleziono indeksu dla bieżącej świecy (index = -1)");
+            Print("⚠️ Nie znaleziono indeksu dla bieżącej świecy (index = -1)");
         return;
     }
 
@@ -288,14 +341,14 @@ void CancelOldPendingOrders(int maxBarsToWait, ulong magicNumber)
 
         // 🔍 Debug: podstawowe informacje o zleceniu
         if (PrintCancelOldPendingOrders)
-        PrintFormat("🧪 DEBUG: isPending=%d, type=%d, magic=%d, ticket=%d",
-                    opd.isPending, opd.type, opd.magic, opd.ticket);
+            PrintFormat("🧪 DEBUG: isPending=%d, type=%d, magic=%d, ticket=%d",
+                        opd.isPending, opd.type, opd.magic, opd.ticket);
 
         int placedAtIndex = FindIndexByTime(opd.openTime);
         if (placedAtIndex == -1)
         {
             if (PrintCancelOldPendingOrders)
-            PrintFormat("❌ Nie znaleziono indeksu świecy dla openTime=%s", TimeToString(opd.openTime));
+                PrintFormat("❌ Nie znaleziono indeksu świecy dla openTime=%s", TimeToString(opd.openTime));
             continue;
         }
 
@@ -303,11 +356,11 @@ void CancelOldPendingOrders(int maxBarsToWait, ulong magicNumber)
 
         // 🔍 Debug: porównanie czasu
         if (PrintCancelOldPendingOrders)
-        PrintFormat("⏱️ Zlecenie oczekujące %d: openTime=%s (i=%d) vs now=%s (i=%d) → barsPassed=%d",
-                    opd.ticket,
-                    TimeToString(opd.openTime), placedAtIndex,
-                    TimeToString(currentCandleTime), currentIndex,
-                    barsPassed);
+            PrintFormat("⏱️ Zlecenie oczekujące %d: openTime=%s (i=%d) vs now=%s (i=%d) → barsPassed=%d",
+                        opd.ticket,
+                        TimeToString(opd.openTime), placedAtIndex,
+                        TimeToString(currentCandleTime), currentIndex,
+                        barsPassed);
 
         if (barsPassed >= maxBarsToWait)
         {
@@ -318,18 +371,18 @@ void CancelOldPendingOrders(int maxBarsToWait, ulong magicNumber)
                 {
                     cancelCount++;
                     if (PrintCancelOldPendingOrders)
-                    PrintFormat("🧹 Usunięto stare zlecenie oczekujące: ticket=%d (wiek: %d świec)", opd.ticket, barsPassed);
+                        PrintFormat("🧹 Usunięto stare zlecenie oczekujące: ticket=%d (wiek: %d świec)", opd.ticket, barsPassed);
                 }
                 else
                 {
                     if (PrintCancelOldPendingOrders)
-                    PrintFormat("❌ Błąd przy usuwaniu zlecenia %d | code=%d", opd.ticket, GetLastError());
+                        PrintFormat("❌ Błąd przy usuwaniu zlecenia %d | code=%d", opd.ticket, GetLastError());
                 }
             }
             else
             {
                 if (PrintCancelOldPendingOrders)
-                PrintFormat("❌ OrderSelect nie powiodło się dla ticket=%d", opd.ticket);
+                    PrintFormat("❌ OrderSelect nie powiodło się dla ticket=%d", opd.ticket);
             }
         }
     }
@@ -339,6 +392,13 @@ void CancelOldPendingOrders(int maxBarsToWait, ulong magicNumber)
 }
 
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: CloseOrdersAndPositions
+// Opis:    Dla aktualnego symbolu i zdefiniowanego inputMagicNumber
+//          zamyka wszystkie otwarte pozycje i usuwa zlecenia oczekujące.
+// Wywołuje: trade.PositionClose(), trade.OrderDelete(), PrintFormat().
+// Globalne/extern: activeOrdersAndPositions[], _Symbol, inputMagicNumber.
+// ─────────────────────────────────────────────────────────────
 void CloseOrdersAndPositions()
 {
     for (int i = 0; i < ArraySize(activeOrdersAndPositions); i++)
@@ -378,6 +438,16 @@ void CloseOrdersAndPositions()
 }
 
 
+// ─────────────────────────────────────────────────────────────
+// Funkcja: ClosePositionsByRSI
+// Opis:    Dla pozycji z danym magicNumber i symbolem – na podstawie sygnałów RSI
+//          (przecięcia poziomów wykupienia/wyprzedania oraz poziomu „SL RSI”)
+//          zamyka pozycje po odczekaniu minimalnej liczby świec (inputRsiSlCandleToWait).
+//          [Poprawka]: Używa trade.PositionClose(opd.symbol) (spójnie z resztą pliku).
+// Wywołuje: CopyBuffer(rsiHandle), trade.PositionClose(), RefreshOrderAndPositionData().
+// Globalne/extern: rsiHandle, inputRSIPeriod, inputRsiSlCandleToWait,
+//                  activeOrdersAndPositions[], _Symbol, PERIOD_CURRENT.
+// ─────────────────────────────────────────────────────────────
 void ClosePositionsByRSI(ulong magicNumber, double rsiLevelOverbought, double rsiLevelOversold, double rsiSlLevel) 
 {
     if (inputRSIPeriod == 0)
@@ -401,7 +471,6 @@ void ClosePositionsByRSI(ulong magicNumber, double rsiLevelOverbought, double rs
     
     PrintFormat("🔁 RSI check: prevRSI = %.2f, lastRSI = %.2f", prevRSI, lastRSI);
 
-
     RefreshOrderAndPositionData();
     datetime currentTime = TimeCurrent();
     int tfSeconds = PeriodSeconds(PERIOD_CURRENT);
@@ -423,7 +492,7 @@ void ClosePositionsByRSI(ulong magicNumber, double rsiLevelOverbought, double rs
 
             if ((allowReversalClose && reversalClose) || slClose)
             {
-                if (trade.PositionClose(opd.ticket))
+                if (trade.PositionClose(opd.symbol))
                     PrintFormat("[INFO RSI] Closed BUY position (ticket: %d)", opd.ticket);
             }
         }
@@ -435,7 +504,7 @@ void ClosePositionsByRSI(ulong magicNumber, double rsiLevelOverbought, double rs
 
             if ((allowReversalClose && reversalClose) || slClose)
             {
-                if (trade.PositionClose(opd.ticket))
+                if (trade.PositionClose(opd.symbol))
                     PrintFormat("[INFO RSI] Closed SELL position (ticket: %d)", opd.ticket);
             }
         }
@@ -443,13 +512,23 @@ void ClosePositionsByRSI(ulong magicNumber, double rsiLevelOverbought, double rs
 }
 
 
-
+// ─────────────────────────────────────────────────────────────
+// Funkcja: ApplyTrailingStop
+// Opis:    Prosty trailing stop oparty o lokalne ekstremum (Highs[2]/Lows[2])
+//          i minimalny bufor (50 „pipsów” = 50 * _Point). Dla BUY podnosi SL
+//          pod Low[2], dla SELL opuszcza SL nad High[2], gdy cena oddaliła się
+//          o bufor. [Poprawka]: sprawdza dostępność i ważność Highs[2]/Lows[2].
+// Wywołuje: SymbolInfoDouble(), ModifyStopLoss().
+// Globalne/extern: inputTrailingStop, activeOrdersAndPositions[], Highs[], Lows[], _Symbol.
+// ─────────────────────────────────────────────────────────────
 void ApplyTrailingStop(ulong magicNumber)
 {
     if (!inputTrailingStop)
-    {
         return; // Trailing Stop wyłączony
-    }
+
+    // ── Safety: upewnij się, że mamy wystarczającą liczbę ekstremów i są ważne
+    bool lowsReady  = (ArraySize(Lows)  > 2 && Lows[2].isValid);
+    bool highsReady = (ArraySize(Highs) > 2 && Highs[2].isValid);
 
     for (int i = 0; i < ArraySize(activeOrdersAndPositions); i++)
     {
@@ -462,7 +541,7 @@ void ApplyTrailingStop(ulong magicNumber)
         double pipValue = SymbolInfoDouble(_Symbol, SYMBOL_POINT) * 50; // 50 pipsów
 
         // Pozycja DŁUGA
-        if (opd.type == POSITION_TYPE_BUY)
+        if (opd.type == POSITION_TYPE_BUY && lowsReady)
         {
             double low2 = Lows[2].value;
             if (opd.sl < low2)
@@ -473,9 +552,8 @@ void ApplyTrailingStop(ulong magicNumber)
                 }
             }
         }
-
         // Pozycja KRÓTKA
-        else if (opd.type == POSITION_TYPE_SELL)
+        else if (opd.type == POSITION_TYPE_SELL && highsReady)
         {
             double high2 = Highs[2].value;
             if (opd.sl > high2)
@@ -489,6 +567,15 @@ void ApplyTrailingStop(ulong magicNumber)
     }
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// Funkcja: ApplyCandleBasedTrailingStop
+// Opis:    Trailing stop „świecowy”. Na zamknięciu każdej świecy (candleHistory[1])
+//          przesuwa SL pod (dla BUY) lub nad (dla SELL) świecę, z niewielkim buforem.
+//          [Poprawka]: dodatkowe zabezpieczenia na dostępność danych.
+// Wywołuje: ModifyStopLoss(), SymbolInfoDouble().
+// Globalne/extern: candleHistory[], activeOrdersAndPositions[], _Digits, _Symbol.
+// ─────────────────────────────────────────────────────────────
 void ApplyCandleBasedTrailingStop(ulong magicNumber)
 {
     static datetime lastTrailingCandleTime = 0;
@@ -534,18 +621,29 @@ void ApplyCandleBasedTrailingStop(ulong magicNumber)
 }
 
 
-
-
+// ─────────────────────────────────────────────────────────────
+// Funkcja: ModifyStopLoss
+// Opis:    Modyfikuje SL pozycji wskazanej ticketem przez wysłanie
+//          żądania TRADE_ACTION_SLTP. TP pobierany z pozycji (PositionSelectByTicket + POSITION_TP).
+//          [Poprawka]: jawne PositionSelectByTicket(ticket) przed pobraniem TP.
+// Wywołuje: OrderSend(), PositionSelectByTicket(), PositionGetDouble(), Print().
+// Globalne/extern: brak bezpośrednich własnych (korzysta z API handlowego MQL5).
+// Zwraca:  void.
+// ─────────────────────────────────────────────────────────────
 void ModifyStopLoss(ulong ticket, double newSL)
 {
+    double tpCurrent = 0.0;
+    if (PositionSelectByTicket(ticket))
+        tpCurrent = PositionGetDouble(POSITION_TP); // TP z właściwej pozycji
+
     MqlTradeRequest request;
-    MqlTradeResult result;
+    MqlTradeResult  result;
     ZeroMemory(request);
 
-    request.action = TRADE_ACTION_SLTP;
+    request.action   = TRADE_ACTION_SLTP;
     request.position = ticket;
-    request.sl = newSL;
-    request.tp = PositionGetDouble(POSITION_TP);
+    request.sl       = newSL;
+    request.tp       = tpCurrent;
 
     if (!OrderSend(request, result))
     {
@@ -557,7 +655,4 @@ void ModifyStopLoss(ulong ticket, double newSL)
     }
 }
 
-
-
 #endif
-
