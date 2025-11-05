@@ -1,0 +1,166 @@
+MQL5/Experts/StartTester/StartTester11.mq5:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/BuySellFunction11.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/CandleAndTranactionData11.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/EA_PathConfig.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/ExitManager.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/ExitPolicy.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/ExitTypes.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/PatternBacktest.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/PatternDetector11.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/PatternOptymalizer11.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/PeaksEnded11.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/Position_Size11.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/RangeAndVolumeAnalyzer11.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/RegimeDetector.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/RegimeExitConfig.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/RegimeExitTypes.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/RegimeThresholds.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/RegimeVisualizer.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/SmartOrderExecutor11.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+MQL5/Include/StartTester/Zmienne11.mqh:
+  role: 
+  includes:
+
+  globals:
+
+  functions:
+
+_summary:
+  unused_candidates:
+    functions:
+
+    globals:
+

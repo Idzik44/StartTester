@@ -1,0 +1,4 @@
+digraph callgraph {
+  rankdir=LR;
+  node [shape=box, fontsize=10];
+}
