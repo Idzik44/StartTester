@@ -7,7 +7,7 @@
 
 #property strict
 
-#include <StartTester/CandleAndTranactionData11.mqh>
+#include <StartTester/CandleAndTransactionData11.mqh>
 
 //+------------------------------------------------------------------+
 //| Struktura przechowująca informacje o ekstremum                   |

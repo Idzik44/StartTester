@@ -9,7 +9,7 @@
 #include <Trade\Trade.mqh>
 #include <StartTester/Zmienne11.mqh>
 #include <StartTester/Position_Size11.mqh>
-#include <StartTester/CandleAndTranactionData11.mqh>
+#include <StartTester/CandleAndTransactionData11.mqh>
 
 // Overload per-regime (parametry SL/TP jawnie)
 void ExecuteImpulseTrade(bool isBuy,

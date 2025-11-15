@@ -4,7 +4,7 @@
 #property strict
 
 #include <StartTester/Zmienne11.mqh>
-#include <StartTester/CandleAndTranactionData11.mqh>
+#include <StartTester/CandleAndTransactionData11.mqh>
 #include <StartTester/RangeAndVolumeAnalyzer11.mqh>
 #include <StartTester/RegimeThresholds.mqh>      // IMP_/DET_* oraz NUM_REGIMES
 #include <StartTester/RegimeExitConfig.mqh>      // GetRegimeExitConfig(...) – exit per regime (CSV inputy)

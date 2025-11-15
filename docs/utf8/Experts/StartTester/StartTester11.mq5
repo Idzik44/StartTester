@@ -7,9 +7,8 @@
 // ─────────────────────────────────────────────────────────────
 // INCLUDE
 #include <StartTester/Zmienne11.mqh>
-#include <StartTester/CandleAndTranactionData11.mqh>
+#include <StartTester/CandleAndTransactionData11.mqh>
 #include <StartTester/PeaksEnded11.mqh>
-//#include <StartTester/Position_Size11.mqh>
 #include <StartTester/RangeAndVolumeAnalyzer11.mqh>
 #include <StartTester/PatternOptymalizer11.mqh>     
 #include <StartTester/PatternDetector11.mqh>

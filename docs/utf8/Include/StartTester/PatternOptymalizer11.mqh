@@ -4,7 +4,7 @@
 #property strict
 
 #include <StartTester/Zmienne11.mqh>
-#include <StartTester/CandleAndTranactionData11.mqh>
+#include <StartTester/CandleAndTransactionData11.mqh>
 #include <StartTester/RangeAndVolumeAnalyzer11.mqh>
 #include <StartTester/Position_Size11.mqh>
 #include <StartTester/PatternBacktest.mqh>

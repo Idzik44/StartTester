@@ -9,7 +9,7 @@
 #define __RANGE_AND_VOLUME_ANALYZER_MQH__
 
 #include <StartTester/Zmienne11.mqh>
-#include <StartTester/CandleAndTranactionData11.mqh>  // uwaga: zgodnie z istniejącą nazwą pliku
+#include <StartTester/CandleAndTransactionData11.mqh>  // uwaga: zgodnie z istniejącą nazwą pliku
 
 
 //----------------------------------------------------------------------

@@ -8,7 +8,7 @@
 #ifndef __PATTERN_BACKTEST_MQH__
 #define __PATTERN_BACKTEST_MQH__
 
-#include <StartTester/CandleAndTranactionData11.mqh>
+#include <StartTester/CandleAndTransactionData11.mqh>
 #include <StartTester/PatternOptymalizer11.mqh>
 #include <StartTester/RegimeExitTypes.mqh>
 #include <StartTester/ExitTypes.mqh>

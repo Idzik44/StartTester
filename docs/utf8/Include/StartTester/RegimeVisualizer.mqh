@@ -7,7 +7,7 @@
 #ifndef __REGIME_VISUALIZER_MQH__
 #define __REGIME_VISUALIZER_MQH__
 
-#include <StartTester/CandleAndTranactionData11.mqh>
+#include <StartTester/CandleAndTransactionData11.mqh>
 #include <StartTester/RegimeThresholds.mqh>
 #include <StartTester/RegimeDetector.mqh>
 

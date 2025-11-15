@@ -3,7 +3,7 @@
 
 #property strict
 
-#include <StartTester/CandleAndTranactionData11.mqh>   // candleHistory[], ComputeCustomADX(), GetCustom*DI/ADX()
+#include <StartTester/CandleAndTransactionData11.mqh>   // candleHistory[], ComputeCustomADX(), GetCustom*DI/ADX()
 #include <StartTester/RangeAndVolumeAnalyzer11.mqh>    // GetStandardizedRange(), GetStandardizedVolume()
 
 // ─────────────────────────────────────────────────────────────

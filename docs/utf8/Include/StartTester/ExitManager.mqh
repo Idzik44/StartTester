@@ -8,7 +8,7 @@
 #define __EXIT_MANAGER_MQH__
 
 #include <Trade/Trade.mqh>
-#include <StartTester/CandleAndTranactionData11.mqh>
+#include <StartTester/CandleAndTransactionData11.mqh>
 #include <StartTester/RangeAndVolumeAnalyzer11.mqh>
 #include <StartTester/RegimeDetector.mqh>
 #include <StartTester/ExitTypes.mqh>   // enum TrailMethod
